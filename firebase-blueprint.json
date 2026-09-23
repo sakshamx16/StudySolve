@@ -1,0 +1,113 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Student profile, courses, and leaderboard statistics",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "avatar": { "type": "string" },
+        "gradeLevel": { "type": "string" },
+        "courses": { "type": "array", "items": { "type": "string" } },
+        "bio": { "type": "string" },
+        "points": { "type": "number" },
+        "solutionsSubmitted": { "type": "number" },
+        "materialsShared": { "type": "number" },
+        "verifiedSolutionsCount": { "type": "number" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "StudyGroup": {
+      "title": "StudyGroup",
+      "description": "Collaborative study group for a specific commerce or academic subject",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "subject": { "type": "string" },
+        "description": { "type": "string" },
+        "memberCount": { "type": "number" },
+        "materialsCount": { "type": "number" },
+        "badgeEmoji": { "type": "string" },
+        "meetingFrequency": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "createdByUid": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "subject"]
+    },
+    "StudyMaterial": {
+      "title": "StudyMaterial",
+      "description": "Question, homework problem, or practice paper posted by a student",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "groupId": { "type": "string" },
+        "groupName": { "type": "string" },
+        "title": { "type": "string" },
+        "subject": { "type": "string" },
+        "topic": { "type": "string" },
+        "difficulty": { "type": "string" },
+        "description": { "type": "string" },
+        "problemStatement": { "type": "string" },
+        "author": { "type": "object" },
+        "attachment": { "type": "object" },
+        "createdAt": { "type": "string" },
+        "dueDate": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "solutionsCount": { "type": "number" },
+        "averageRating": { "type": "number" },
+        "isSolved": { "type": "boolean" },
+        "authorUid": { "type": "string" }
+      },
+      "required": ["id", "title", "subject"]
+    },
+    "Solution": {
+      "title": "Solution",
+      "description": "Student solution to a posted study question or problem",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "materialId": { "type": "string" },
+        "materialTitle": { "type": "string" },
+        "title": { "type": "string" },
+        "author": { "type": "object" },
+        "authorUid": { "type": "string" },
+        "solutionType": { "type": "string" },
+        "mediaUrl": { "type": "string" },
+        "fileName": { "type": "string" },
+        "steps": { "type": "array", "items": { "type": "object" } },
+        "keyTakeaway": { "type": "string" },
+        "toolsUsed": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string" },
+        "averageRating": { "type": "number" },
+        "ratingsCount": { "type": "number" },
+        "reviews": { "type": "array", "items": { "type": "object" } },
+        "isVerified": { "type": "boolean" },
+        "helpfulVotes": { "type": "number" }
+      },
+      "required": ["id", "materialId", "title"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile documents keyed by Firebase Auth UID"
+    },
+    "/study_groups/{groupId}": {
+      "schema": "StudyGroup",
+      "description": "Study groups created by students"
+    },
+    "/materials/{materialId}": {
+      "schema": "StudyMaterial",
+      "description": "Questions and study materials posted in groups or subjects"
+    },
+    "/solutions/{solutionId}": {
+      "schema": "Solution",
+      "description": "Student solutions submitted for study materials"
+    }
+  }
+}

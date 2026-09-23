@@ -1,0 +1,6 @@
+{
+  "name": "StudySolve",
+  "description": "Collaborative study and solution exchange: Financial Accounting, Taxation, Costing, Economics, and Business Studies with verified PDF, image, and video walkthroughs.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
