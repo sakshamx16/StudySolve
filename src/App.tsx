@@ -91,8 +91,40 @@ export default function App() {
     saveStoredUser(user);
   }, [user]);
 
-  // Navigation & Group filter
-  const [activeTab, setActiveTab] = useState<'materials' | 'groups' | 'top-solutions' | 'leaderboard'>('materials');
+  // Navigation & Group filter with URL synchronization
+  const getInitialTab = (): 'materials' | 'groups' | 'top-solutions' | 'leaderboard' => {
+    if (typeof window === 'undefined') return 'materials';
+    const path = window.location.pathname.toLowerCase();
+    const params = new URLSearchParams(window.location.search);
+    const tabParam = params.get('tab')?.toLowerCase();
+
+    if (tabParam === 'groups' || path.startsWith('/groups')) return 'groups';
+    if (tabParam === 'top-solutions' || tabParam === 'solutions' || path.startsWith('/top-solutions')) return 'top-solutions';
+    if (tabParam === 'leaderboard' || path.startsWith('/leaderboard')) return 'leaderboard';
+    if (tabParam === 'materials' || path.startsWith('/materials')) return 'materials';
+    return 'materials';
+  };
+
+  const [activeTab, setActiveTab] = useState<'materials' | 'groups' | 'top-solutions' | 'leaderboard'>(getInitialTab);
+
+  const handleTabChange = (tab: 'materials' | 'groups' | 'top-solutions' | 'leaderboard') => {
+    setActiveTab(tab);
+    if (typeof window !== 'undefined' && window.history?.pushState) {
+      const targetUrl = tab === 'materials' ? '/' : `/${tab}`;
+      if (window.location.pathname !== targetUrl) {
+        window.history.pushState({ tab }, '', targetUrl);
+      }
+    }
+  };
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setActiveTab(getInitialTab());
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -535,7 +567,7 @@ export default function App() {
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={handleTabChange}
         onOpenShareModal={() => setIsCreateMaterialOpen(true)}
         onOpenCreateGroupModal={() => setIsCreateGroupOpen(true)}
         user={user}
@@ -608,15 +640,15 @@ export default function App() {
             {/* Beginner-friendly Guide Banner (dismissible) */}
             <BeginnerGuideBanner
               onExploreClick={() => {
-                setActiveTab('materials');
+                handleTabChange('materials');
                 const el = document.getElementById('problems-section');
                 el?.scrollIntoView({ behavior: 'smooth' });
               }}
               onPostClick={() => setIsCreateMaterialOpen(true)}
               onSolveClick={() => setIsSelectQuestionToSolveOpen(true)}
-              onTopSolutionsClick={() => setActiveTab('top-solutions')}
+              onTopSolutionsClick={() => handleTabChange('top-solutions')}
               onSearchClick={() => {
-                setActiveTab('materials');
+                handleTabChange('materials');
                 const searchInput = document.querySelector('input[type="text"]') as HTMLInputElement;
                 if (searchInput) {
                   searchInput.focus();
@@ -711,7 +743,7 @@ export default function App() {
             onToggleJoinGroup={handleToggleJoinGroup}
             onSelectGroupMaterials={(groupId) => {
               setSelectedGroupId(groupId);
-              setActiveTab('materials');
+              handleTabChange('materials');
             }}
             onOpenCreateGroupModal={() => setIsCreateGroupOpen(true)}
             onDeleteGroup={handleDeleteGroup}
