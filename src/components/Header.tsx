@@ -71,35 +71,6 @@ export default function Header({
 
   return (
     <header className="sticky top-0 z-30 bg-white/95 dark:bg-stone-900/95 backdrop-blur-md border-b border-stone-200 dark:border-stone-800 transition-colors">
-      {/* Top utility alert or notification strip */}
-      <div className="bg-stone-900 dark:bg-black text-stone-200 text-xs px-4 py-1.5 flex items-center justify-between border-b border-stone-800 dark:border-stone-800/80">
-        <div className="flex items-center gap-2 max-w-7xl mx-auto w-full">
-          <span className="inline-flex items-center gap-1 font-medium text-emerald-400">
-            <Sparkles className="w-3.5 h-3.5" /> Peer Study Network
-          </span>
-          <span className="hidden sm:inline text-stone-400">|</span>
-          <span className="hidden sm:inline text-stone-300 dark:text-stone-400">
-            Share problem sheets, post verified PDF/Image/Video solutions, and rate peer explanations.
-          </span>
-          <div className="ml-auto flex items-center gap-3">
-            {isSyncingProfile && (
-              <span className="text-blue-400 text-xs font-medium flex items-center gap-1.5">
-                <Loader2 className="w-3 h-3 animate-spin" />
-                <span className="hidden sm:inline">Syncing profile...</span>
-              </span>
-            )}
-            <button
-              onClick={onResetDemoData}
-              title="Reset sample data"
-              className="text-stone-400 hover:text-white text-xs flex items-center gap-1 transition-colors"
-            >
-              <RotateCcw className="w-3 h-3" />
-              <span className="hidden md:inline">Reset Workspace</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
       <div className="max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 w-full">
         <div className="flex items-center justify-between h-14 sm:h-16 gap-1 sm:gap-3">
           {/* Logo & Brand - shrink-0 ensures 'StudySolve' is ALWAYS fully visible */}
