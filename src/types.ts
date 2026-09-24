@@ -153,4 +153,6 @@ export interface UserProfile {
   solutionsSubmitted: number;
   materialsShared: number;
   joinedGroupIds: string[];
+  hasCustomAvatar?: boolean;
+  customAvatar?: string;
 }

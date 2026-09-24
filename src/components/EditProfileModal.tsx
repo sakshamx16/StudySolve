@@ -174,6 +174,8 @@ export default function EditProfileModal({
       ...currentUser,
       name: name.trim(),
       avatar,
+      hasCustomAvatar: true,
+      customAvatar: avatar,
       gradeLevel: gradeLevel.trim(),
       courses,
       bio: bio.trim(),

@@ -66,7 +66,8 @@ import {
   addSolutionToFirestore, 
   addGroupToFirestore,
   deleteGroupFromFirestore,
-  syncUserProfileToFirestore 
+  syncUserProfileToFirestore,
+  fetchUserProfileFromFirestore 
 } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 
@@ -165,19 +166,57 @@ export default function App() {
 
   // Sync Firebase Auth state
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
+        let cloudProfile: UserProfile | null = null;
+        try {
+          cloudProfile = await fetchUserProfileFromFirestore(firebaseUser.uid);
+        } catch (err) {
+          console.warn('Could not fetch cloud profile:', err);
+        }
+
         setUser((prev) => {
-          const studentName = firebaseUser.displayName || prev.name || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'Student Scholar');
+          const studentName = cloudProfile?.name || firebaseUser.displayName || prev.name || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'Student Scholar');
+          
+          // Determine avatar with strict priority:
+          // 1. Cloud profile custom avatar
+          // 2. Previously selected website avatar if custom
+          // 3. Cloud profile's existing avatar
+          // 4. Initial fallback: Google photoURL or deterministic avatar
+          let resolvedAvatar = '';
+          const isPrevCustom = prev.hasCustomAvatar || (prev.avatar && prev.id !== 'guest' && !prev.avatar.includes('googleusercontent.com'));
+
+          if (cloudProfile?.hasCustomAvatar && cloudProfile.avatar) {
+            resolvedAvatar = cloudProfile.avatar;
+          } else if (isPrevCustom && prev.avatar) {
+            resolvedAvatar = prev.avatar;
+          } else if (cloudProfile?.avatar && !cloudProfile.avatar.includes('googleusercontent.com')) {
+            resolvedAvatar = cloudProfile.avatar;
+          } else if (cloudProfile?.avatar) {
+            resolvedAvatar = cloudProfile.avatar;
+          } else {
+            resolvedAvatar = firebaseUser.photoURL || getStudentAvatar(studentName);
+          }
+
+          const hasCustom = Boolean(
+            cloudProfile?.hasCustomAvatar ||
+            isPrevCustom ||
+            (resolvedAvatar && !resolvedAvatar.includes('googleusercontent.com'))
+          );
+
           const updated: UserProfile = {
             ...prev,
+            ...(cloudProfile || {}),
             id: firebaseUser.uid,
             authUid: firebaseUser.uid,
             name: studentName,
             email: firebaseUser.email || undefined,
-            avatar: getStudentAvatar(studentName, firebaseUser.photoURL || prev.avatar),
+            avatar: resolvedAvatar,
+            hasCustomAvatar: hasCustom,
+            customAvatar: hasCustom ? resolvedAvatar : (cloudProfile?.customAvatar || prev.customAvatar),
             isAnonymous: firebaseUser.isAnonymous,
           };
+
           syncUserProfileToFirestore(updated).catch(() => {});
           return updated;
         });
