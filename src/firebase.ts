@@ -158,7 +158,7 @@ export async function fetchUserProfileFromFirestore(uid: string): Promise<UserPr
 // Subscribe to user profile document in real-time across devices
 export function subscribeToUserProfile(
   uid: string,
-  onData: (profile: UserProfile) => void,
+  onData: (profile: UserProfile | null) => void,
   onError?: (err: any) => void
 ): Unsubscribe {
   if (!uid || uid === 'guest') {
@@ -167,9 +167,12 @@ export function subscribeToUserProfile(
   const userRef = doc(db, 'users', uid);
   return onSnapshot(
     userRef,
+    { includeMetadataChanges: false },
     (snapshot) => {
       if (snapshot.exists()) {
         onData({ id: snapshot.id, authUid: snapshot.id, ...snapshot.data() } as UserProfile);
+      } else {
+        onData(null);
       }
     },
     (err) => {

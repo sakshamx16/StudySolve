@@ -166,135 +166,135 @@ export default function App() {
   const [isSelectQuestionToSolveOpen, setIsSelectQuestionToSolveOpen] = useState(false);
   const [isSyncingProfile, setIsSyncingProfile] = useState(false);
 
-  // Non-blocking Firebase Auth & real-time profile sync across devices
+  // Auth state & Real-time profile sync across devices
   useEffect(() => {
     let unsubProfileDoc: (() => void) | null = null;
+    let activeAuthUid: string | null = null;
 
-    const unsubscribeAuth = onAuthStateChanged(auth, (firebaseUser) => {
-      // Clean up previous profile doc listener if any
+    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      // 1. Clean up any previous profile listener
       if (unsubProfileDoc) {
         unsubProfileDoc();
         unsubProfileDoc = null;
       }
 
-      if (firebaseUser) {
-        const uid = firebaseUser.uid;
+      if (!firebaseUser) {
+        activeAuthUid = null;
+        setIsSyncingProfile(false);
+        setUser(GUEST_USER);
+        clearStoredUser();
+        return;
+      }
 
-        // 1. FAST NON-BLOCKING LOGIN: Set user state immediately from auth credentials and local storage cache
-        const cachedUser = getStoredUser();
-        const hasCachedProfile = cachedUser && (cachedUser.id === uid || cachedUser.authUid === uid);
-        const studentName = (hasCachedProfile && cachedUser.name)
-          ? cachedUser.name
-          : (firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'Student Scholar'));
+      const uid = firebaseUser.uid;
+      activeAuthUid = uid;
 
-        const initialAvatar = (hasCachedProfile && cachedUser.hasCustomAvatar && cachedUser.avatar)
-          ? cachedUser.avatar
-          : (firebaseUser.photoURL || getStudentAvatar(studentName));
+      // 2. Fast local hydration: If cached profile matches this UID, display it immediately
+      const cachedUser = getStoredUser();
+      if (cachedUser && (cachedUser.id === uid || cachedUser.authUid === uid)) {
+        setUser(cachedUser);
+      }
 
-        const immediateUser: UserProfile = {
-          ...GUEST_USER,
-          ...(hasCachedProfile ? cachedUser : {}),
-          id: uid,
-          authUid: uid,
-          name: studentName,
-          email: firebaseUser.email || (hasCachedProfile ? cachedUser.email : undefined),
-          avatar: initialAvatar,
-          hasCustomAvatar: Boolean(hasCachedProfile && cachedUser.hasCustomAvatar),
-          customAvatar: hasCachedProfile ? cachedUser.customAvatar : undefined,
-          isAnonymous: firebaseUser.isAnonymous,
-        };
+      // 3. Show "Syncing Profile" while fetching the cloud record
+      setIsSyncingProfile(true);
 
-        setUser(immediateUser);
-        saveStoredUser(immediateUser);
+      try {
+        // Fetch the profile ONCE during login from Cloud Firestore
+        const cloudProfile = await fetchUserProfileFromFirestore(uid);
 
-        // 2. BACKGROUND REAL-TIME SYNC: Listen to users/{uid} without blocking authentication
-        setIsSyncingProfile(true);
+        // Guard against auth state changing during the async fetch
+        if (activeAuthUid !== uid) return;
+
+        let resolvedUser: UserProfile;
+
+        if (cloudProfile) {
+          // Cloud profile exists (e.g. edited on Device A) — adopt it completely!
+          // NEVER overwrite with default credentials
+          resolvedUser = {
+            ...GUEST_USER,
+            ...cloudProfile,
+            id: uid,
+            authUid: uid,
+            email: firebaseUser.email || cloudProfile.email,
+            isAnonymous: firebaseUser.isAnonymous,
+          };
+        } else {
+          // First-time user registration: create initial profile document
+          const defaultName = firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'Student Scholar');
+          const defaultAvatar = firebaseUser.photoURL || getStudentAvatar(defaultName);
+          resolvedUser = {
+            ...GUEST_USER,
+            id: uid,
+            authUid: uid,
+            name: defaultName,
+            email: firebaseUser.email || undefined,
+            avatar: defaultAvatar,
+            isAnonymous: firebaseUser.isAnonymous,
+          };
+          await syncUserProfileToFirestore(resolvedUser).catch(() => {});
+        }
+
+        if (activeAuthUid === uid) {
+          setUser(resolvedUser);
+          saveStoredUser(resolvedUser);
+        }
+
+        // 4. STOP the loading spinner immediately after the initial profile is loaded!
+        setIsSyncingProfile(false);
+
+        // 5. Establish a SINGLE real-time Firestore listener for subsequent cross-device edits
         unsubProfileDoc = subscribeToUserProfile(
           uid,
-          (cloudProfile) => {
-            setIsSyncingProfile(false);
-            if (!cloudProfile) return;
-
+          (liveProfile) => {
+            if (activeAuthUid !== uid || !liveProfile) return;
             setUser((prev) => {
-              const pName = cloudProfile.name || prev.name;
-              let finalAvatar = prev.avatar;
-
-              if (cloudProfile.hasCustomAvatar && cloudProfile.avatar) {
-                finalAvatar = cloudProfile.avatar;
-              } else if (cloudProfile.customAvatar) {
-                finalAvatar = cloudProfile.customAvatar;
-              } else if (prev.hasCustomAvatar && prev.avatar) {
-                finalAvatar = prev.avatar;
-              } else if (cloudProfile.avatar && !cloudProfile.avatar.includes('googleusercontent.com')) {
-                finalAvatar = cloudProfile.avatar;
-              } else if (cloudProfile.avatar) {
-                finalAvatar = cloudProfile.avatar;
-              } else if (firebaseUser.photoURL) {
-                finalAvatar = firebaseUser.photoURL;
-              }
-
-              const hasCustom = Boolean(
-                cloudProfile.hasCustomAvatar ||
-                cloudProfile.customAvatar ||
-                prev.hasCustomAvatar ||
-                (finalAvatar && !finalAvatar.includes('googleusercontent.com'))
-              );
-
               const merged: UserProfile = {
                 ...prev,
-                ...cloudProfile,
+                ...liveProfile,
                 id: uid,
                 authUid: uid,
-                name: pName,
-                email: firebaseUser.email || cloudProfile.email || prev.email,
-                avatar: finalAvatar,
-                hasCustomAvatar: hasCustom,
-                customAvatar: hasCustom ? finalAvatar : (cloudProfile.customAvatar || prev.customAvatar),
-                isAnonymous: firebaseUser.isAnonymous,
               };
-
               saveStoredUser(merged);
               return merged;
             });
           },
           (err) => {
             console.warn('Real-time profile sync notice:', err);
-            setIsSyncingProfile(false);
           }
         );
 
-        // If newly registered, sync initial record in background without blocking
-        syncUserProfileToFirestore(immediateUser).catch(() => {});
-
-      } else {
-        // User logged out
-        setIsSyncingProfile(false);
-        setUser(GUEST_USER);
-        clearStoredUser();
+      } catch (err) {
+        console.warn('Profile fetch notice:', err);
+        if (activeAuthUid === uid) {
+          setIsSyncingProfile(false);
+        }
       }
     });
 
     // Offline mode recovery listener
     const handleOnline = () => {
-      if (auth.currentUser) {
+      if (auth.currentUser && activeAuthUid === auth.currentUser.uid) {
         setIsSyncingProfile(true);
         fetchUserProfileFromFirestore(auth.currentUser.uid)
-          .then((liveProfile) => {
-            if (liveProfile) {
-              setUser((curr) => {
-                const merged = { ...curr, ...liveProfile, id: auth.currentUser!.uid, authUid: auth.currentUser!.uid };
+          .then((cloudProfile) => {
+            if (cloudProfile && activeAuthUid === auth.currentUser?.uid) {
+              setUser((prev) => {
+                const merged = { ...prev, ...cloudProfile, id: activeAuthUid!, authUid: activeAuthUid! };
                 saveStoredUser(merged);
                 return merged;
               });
             }
           })
           .catch(() => {})
-          .finally(() => setIsSyncingProfile(false));
+          .finally(() => {
+            setIsSyncingProfile(false);
+          });
       }
     };
     window.addEventListener('online', handleOnline);
 
     return () => {
+      activeAuthUid = null;
       unsubscribeAuth();
       if (unsubProfileDoc) unsubProfileDoc();
       window.removeEventListener('online', handleOnline);

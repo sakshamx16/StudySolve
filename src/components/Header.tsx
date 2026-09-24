@@ -83,7 +83,7 @@ export default function Header({
           </span>
           <div className="ml-auto flex items-center gap-3">
             {isSyncingProfile && (
-              <span className="text-blue-400 text-xs font-medium flex items-center gap-1.5 animate-pulse">
+              <span className="text-blue-400 text-xs font-medium flex items-center gap-1.5">
                 <Loader2 className="w-3 h-3 animate-spin" />
                 <span className="hidden sm:inline">Syncing profile...</span>
               </span>
