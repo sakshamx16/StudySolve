@@ -11,7 +11,8 @@ import {
   Plus, 
   Trash2,
   Camera,
-  RotateCcw
+  RotateCcw,
+  Loader2
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { UserProfile } from '../types';
@@ -21,7 +22,7 @@ interface EditProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentUser: UserProfile;
-  onUpdateUser: (updatedProfile: UserProfile) => void;
+  onUpdateUser: (updatedProfile: UserProfile) => Promise<void> | void;
 }
 
 // Curated student avatars (diverse styles, academic, professional, and friendly)
@@ -165,11 +166,14 @@ export default function EditProfileModal({
     }
   };
 
-  // Submit profile changes
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) return;
+  const [isSaving, setIsSaving] = useState(false);
 
+  // Submit profile changes
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim() || isSaving) return;
+
+    setIsSaving(true);
     const updated: UserProfile = {
       ...currentUser,
       name: name.trim(),
@@ -181,23 +185,29 @@ export default function EditProfileModal({
       bio: bio.trim(),
     };
 
-    onUpdateUser(updated);
-    setIsSaved(true);
-
     try {
-      confetti({
-        particleCount: 50,
-        spread: 60,
-        origin: { y: 0.7 },
-      });
-    } catch {
-      // ignore
-    }
+      await onUpdateUser(updated);
+      setIsSaved(true);
 
-    setTimeout(() => {
-      setIsSaved(false);
-      onClose();
-    }, 500);
+      try {
+        confetti({
+          particleCount: 50,
+          spread: 60,
+          origin: { y: 0.7 },
+        });
+      } catch {
+        // ignore
+      }
+
+      setTimeout(() => {
+        setIsSaved(false);
+        setIsSaving(false);
+        onClose();
+      }, 500);
+    } catch (err) {
+      console.error('Failed to sync profile:', err);
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -564,10 +574,15 @@ export default function EditProfileModal({
 
             <button
               type="submit"
-              disabled={!name.trim()}
+              disabled={!name.trim() || isSaving}
               className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs sm:text-sm font-bold shadow-sm shadow-blue-600/30 transition-all flex items-center gap-2"
             >
-              {isSaved ? (
+              {isSaving ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Syncing to Cloud...</span>
+                </>
+              ) : isSaved ? (
                 <>
                   <Check className="w-4 h-4" />
                   <span>Profile Saved!</span>

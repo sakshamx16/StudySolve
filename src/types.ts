@@ -155,4 +155,5 @@ export interface UserProfile {
   joinedGroupIds: string[];
   hasCustomAvatar?: boolean;
   customAvatar?: string;
+  updatedAt?: string;
 }

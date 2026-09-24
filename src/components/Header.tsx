@@ -18,7 +18,8 @@ import {
   ShieldCheck,
   User,
   Sun,
-  Moon
+  Moon,
+  Loader2
 } from 'lucide-react';
 import { StudyGroup, UserProfile } from '../types';
 import { getStudentAvatar } from '../utils/avatar';
@@ -40,6 +41,7 @@ interface HeaderProps {
   onSignOut?: () => void;
   theme?: 'light' | 'dark';
   onToggleTheme?: () => void;
+  isSyncingProfile?: boolean;
 }
 
 export default function Header({
@@ -59,6 +61,7 @@ export default function Header({
   onSignOut,
   theme = 'light',
   onToggleTheme,
+  isSyncingProfile = false,
 }: HeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -79,6 +82,12 @@ export default function Header({
             Share problem sheets, post verified PDF/Image/Video solutions, and rate peer explanations.
           </span>
           <div className="ml-auto flex items-center gap-3">
+            {isSyncingProfile && (
+              <span className="text-blue-400 text-xs font-medium flex items-center gap-1.5 animate-pulse">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                <span className="hidden sm:inline">Syncing profile...</span>
+              </span>
+            )}
             <button
               onClick={onResetDemoData}
               title="Reset sample data"
@@ -261,12 +270,20 @@ export default function Header({
                   className="flex items-center gap-2 p-0.5 sm:p-1 rounded-full hover:bg-stone-100 border border-transparent hover:border-stone-200 transition-colors shrink-0"
                   title={`Logged in as ${user.name}`}
                 >
-                  <img
-                    src={getStudentAvatar(user.name, user.avatar)}
-                    alt={user.name}
-                    className="w-8 h-8 rounded-full object-cover ring-2 ring-stone-200 shrink-0 aspect-square"
-                    referrerPolicy="no-referrer"
-                  />
+                  <div className="relative">
+                    <img
+                      src={getStudentAvatar(user.name, user.avatar)}
+                      alt={user.name}
+                      className="w-8 h-8 rounded-full object-cover ring-2 ring-stone-200 shrink-0 aspect-square"
+                      referrerPolicy="no-referrer"
+                    />
+                    {isSyncingProfile && (
+                      <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500" />
+                      </span>
+                    )}
+                  </div>
                   <div className="hidden lg:block text-left text-xs">
                     <div className="font-semibold text-stone-800 leading-tight">{user.name}</div>
                     <div className="text-[10px] text-amber-600 font-medium flex items-center gap-1">

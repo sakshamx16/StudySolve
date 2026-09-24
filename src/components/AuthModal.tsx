@@ -51,53 +51,7 @@ export default function AuthModal({
     setLoading(true);
     setError(null);
     try {
-      const fbUser = await signInWithGoogle();
-      let cloudProfile: UserProfile | null = null;
-      try {
-        cloudProfile = await fetchUserProfileFromFirestore(fbUser.uid);
-      } catch {
-        // ignore
-      }
-
-      const pName = cloudProfile?.name || fbUser.displayName || fbUser.email?.split('@')[0] || 'Commerce Scholar';
-      
-      // Preserve website profile picture, never overwrite with Gmail photo if user customized it
-      let finalAvatar = '';
-      if (cloudProfile?.hasCustomAvatar && cloudProfile.avatar) {
-        finalAvatar = cloudProfile.avatar;
-      } else if (currentUser.hasCustomAvatar && currentUser.avatar) {
-        finalAvatar = currentUser.avatar;
-      } else if (cloudProfile?.avatar && !cloudProfile.avatar.includes('googleusercontent.com')) {
-        finalAvatar = cloudProfile.avatar;
-      } else if (currentUser.avatar && currentUser.id !== 'guest' && !currentUser.avatar.includes('googleusercontent.com')) {
-        finalAvatar = currentUser.avatar;
-      } else if (cloudProfile?.avatar) {
-        finalAvatar = cloudProfile.avatar;
-      } else {
-        finalAvatar = fbUser.photoURL || getStudentAvatar(pName);
-      }
-
-      const hasCustom = Boolean(
-        cloudProfile?.hasCustomAvatar ||
-        currentUser.hasCustomAvatar ||
-        (finalAvatar && !finalAvatar.includes('googleusercontent.com'))
-      );
-
-      const updatedProfile: UserProfile = {
-        ...currentUser,
-        ...(cloudProfile || {}),
-        id: fbUser.uid,
-        authUid: fbUser.uid,
-        name: pName,
-        email: fbUser.email || undefined,
-        avatar: finalAvatar,
-        hasCustomAvatar: hasCustom,
-        customAvatar: hasCustom ? finalAvatar : (cloudProfile?.customAvatar || currentUser.customAvatar),
-        isAnonymous: false,
-      };
-
-      onAuthSuccess(updatedProfile);
-      syncUserProfileToFirestore(updatedProfile).catch(() => {});
+      await signInWithGoogle();
       onClose();
     } catch (err: any) {
       console.error('Google sign-in error:', err);
@@ -122,52 +76,7 @@ export default function AuthModal({
 
     try {
       if (tab === 'signin') {
-        const fbUser = await loginWithEmail(email.trim(), password);
-        let cloudProfile: UserProfile | null = null;
-        try {
-          cloudProfile = await fetchUserProfileFromFirestore(fbUser.uid);
-        } catch {
-          // ignore
-        }
-
-        const pName = cloudProfile?.name || fbUser.displayName || currentUser.name || email.split('@')[0];
-        
-        let finalAvatar = '';
-        if (cloudProfile?.hasCustomAvatar && cloudProfile.avatar) {
-          finalAvatar = cloudProfile.avatar;
-        } else if (currentUser.hasCustomAvatar && currentUser.avatar) {
-          finalAvatar = currentUser.avatar;
-        } else if (cloudProfile?.avatar && !cloudProfile.avatar.includes('googleusercontent.com')) {
-          finalAvatar = cloudProfile.avatar;
-        } else if (currentUser.avatar && currentUser.id !== 'guest' && !currentUser.avatar.includes('googleusercontent.com')) {
-          finalAvatar = currentUser.avatar;
-        } else if (cloudProfile?.avatar) {
-          finalAvatar = cloudProfile.avatar;
-        } else {
-          finalAvatar = fbUser.photoURL || currentUser.avatar || getStudentAvatar(pName);
-        }
-
-        const hasCustom = Boolean(
-          cloudProfile?.hasCustomAvatar ||
-          currentUser.hasCustomAvatar ||
-          (finalAvatar && !finalAvatar.includes('googleusercontent.com'))
-        );
-
-        const updatedProfile: UserProfile = {
-          ...currentUser,
-          ...(cloudProfile || {}),
-          id: fbUser.uid,
-          authUid: fbUser.uid,
-          email: fbUser.email || email.trim(),
-          name: pName,
-          avatar: finalAvatar,
-          hasCustomAvatar: hasCustom,
-          customAvatar: hasCustom ? finalAvatar : (cloudProfile?.customAvatar || currentUser.customAvatar),
-          isAnonymous: false,
-        };
-
-        onAuthSuccess(updatedProfile);
-        syncUserProfileToFirestore(updatedProfile).catch(() => {});
+        await loginWithEmail(email.trim(), password);
         onClose();
       } else if (tab === 'signup') {
         if (!displayName.trim()) {

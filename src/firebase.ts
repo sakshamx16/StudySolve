@@ -21,6 +21,8 @@ import {
   signOut as firebaseSignOut, 
   onAuthStateChanged,
   updateProfile,
+  setPersistence,
+  browserLocalPersistence,
   User as FirebaseUser
 } from 'firebase/auth';
 import { StudyMaterial, Solution, StudyGroup, UserProfile } from './types';
@@ -39,13 +41,16 @@ export const firebaseConfig = {
 // Initialize Firebase with config
 export const app = initializeApp(firebaseConfig);
 
-// Initialize Auth
+// Initialize Auth with browser local persistence for session continuity across tabs and restarts
 export const auth = getAuth(app);
+setPersistence(auth, browserLocalPersistence).catch((err) => {
+  console.warn('Auth session persistence initialization notice:', err);
+});
 
 // Initialize Firestore
 export const db = getFirestore(app);
 
-// Google Auth Provider
+// Google Auth Provider - reused singleton instance
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
@@ -53,14 +58,28 @@ googleProvider.setCustomParameters({ prompt: 'select_account' });
 // Authentication Helpers
 // -------------------------------------------------------------
 
-export async function signInWithGoogle() {
-  try {
-    const result = await signInWithPopup(auth, googleProvider);
-    return result.user;
-  } catch (error: any) {
-    console.error('Google sign-in error:', error);
-    throw error;
+// Active in-flight sign-in lock to prevent duplicate popup triggers and race conditions
+let inFlightGoogleSignIn: Promise<FirebaseUser> | null = null;
+
+export async function signInWithGoogle(): Promise<FirebaseUser> {
+  if (inFlightGoogleSignIn) {
+    return inFlightGoogleSignIn;
   }
+
+  inFlightGoogleSignIn = (async () => {
+    try {
+      await setPersistence(auth, browserLocalPersistence).catch(() => {});
+      const result = await signInWithPopup(auth, googleProvider);
+      return result.user;
+    } catch (error: any) {
+      console.error('Google sign-in error:', error);
+      throw error;
+    } finally {
+      inFlightGoogleSignIn = null;
+    }
+  })();
+
+  return inFlightGoogleSignIn;
 }
 
 export async function registerWithEmail(email: string, pass: string, name: string) {
@@ -94,34 +113,71 @@ export const signOutUser = logOutUser;
 // Firestore Helpers for Real-time Multi-user Sync
 // -------------------------------------------------------------
 
-// Save/Update user profile
+// Save/Update user profile in Cloud Firestore using authenticated user's UID as doc ID
 export async function syncUserProfileToFirestore(profile: UserProfile): Promise<void> {
   try {
-    if (!profile.id || profile.id === 'guest') return;
-    const userRef = doc(db, 'users', profile.id);
-    await setDoc(userRef, {
+    const targetUid = profile.authUid || (auth.currentUser ? auth.currentUser.uid : (profile.id !== 'guest' ? profile.id : null));
+    if (!targetUid || targetUid === 'guest') return;
+
+    const userRef = doc(db, 'users', targetUid);
+    const dataToSave: Partial<UserProfile> & { updatedAt: string } = {
       ...profile,
-      updatedAt: new Date().toISOString()
-    }, { merge: true });
+      id: targetUid,
+      authUid: targetUid,
+      updatedAt: new Date().toISOString(),
+    };
+
+    // If user has a custom website avatar, preserve it
+    if (profile.avatar && !profile.avatar.includes('googleusercontent.com')) {
+      dataToSave.hasCustomAvatar = true;
+      dataToSave.customAvatar = profile.avatar;
+    }
+
+    await setDoc(userRef, dataToSave, { merge: true });
   } catch (err) {
     console.warn('Could not sync user profile to Firestore:', err);
+    throw err;
   }
 }
 
 // Fetch user profile from Firestore by UID
 export async function fetchUserProfileFromFirestore(uid: string): Promise<UserProfile | null> {
+  if (!uid || uid === 'guest') return null;
   try {
-    if (!uid || uid === 'guest') return null;
     const userRef = doc(db, 'users', uid);
     const snap = await getDoc(userRef);
     if (snap.exists()) {
-      return { id: snap.id, ...snap.data() } as UserProfile;
+      return { id: snap.id, authUid: snap.id, ...snap.data() } as UserProfile;
     }
     return null;
   } catch (err) {
     console.warn('Could not fetch user profile from Firestore:', err);
     return null;
   }
+}
+
+// Subscribe to user profile document in real-time across devices
+export function subscribeToUserProfile(
+  uid: string,
+  onData: (profile: UserProfile) => void,
+  onError?: (err: any) => void
+): Unsubscribe {
+  if (!uid || uid === 'guest') {
+    return () => {};
+  }
+  const userRef = doc(db, 'users', uid);
+  return onSnapshot(
+    userRef,
+    (snapshot) => {
+      if (snapshot.exists()) {
+        onData({ id: snapshot.id, authUid: snapshot.id, ...snapshot.data() } as UserProfile);
+      }
+    },
+    (err) => {
+      console.warn('User profile real-time sync notice:', err);
+      if (onError) onError(err);
+    }
+  );
 }
 
 // Subscribe to questions / materials

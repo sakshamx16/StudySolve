@@ -67,7 +67,8 @@ import {
   addGroupToFirestore,
   deleteGroupFromFirestore,
   syncUserProfileToFirestore,
-  fetchUserProfileFromFirestore 
+  fetchUserProfileFromFirestore,
+  subscribeToUserProfile
 } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 
@@ -163,66 +164,131 @@ export default function App() {
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isSelectQuestionToSolveOpen, setIsSelectQuestionToSolveOpen] = useState(false);
+  const [isSyncingProfile, setIsSyncingProfile] = useState(false);
 
-  // Sync Firebase Auth state
+  // Sync Firebase Auth state & Real-time cross-device user profile listener
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    let unsubProfileDoc: (() => void) | null = null;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      // Clean up previous profile doc listener if any
+      if (unsubProfileDoc) {
+        unsubProfileDoc();
+        unsubProfileDoc = null;
+      }
+
       if (firebaseUser) {
-        let cloudProfile: UserProfile | null = null;
+        setIsSyncingProfile(true);
+        const uid = firebaseUser.uid;
         try {
-          cloudProfile = await fetchUserProfileFromFirestore(firebaseUser.uid);
+          const cloudProfile = await fetchUserProfileFromFirestore(uid);
+
+          setUser((prev) => {
+            const studentName = cloudProfile?.name || firebaseUser.displayName || prev.name || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'Student Scholar');
+            
+            // Avatar resolution logic:
+            // 1. Cloud custom avatar
+            // 2. Previously stored custom avatar if valid
+            // 3. Cloud profile's existing avatar
+            // 4. Fallback: Google photoURL or deterministic avatar
+            let resolvedAvatar = '';
+            const isPrevCustom = prev.hasCustomAvatar || (prev.avatar && prev.id !== 'guest' && !prev.avatar.includes('googleusercontent.com'));
+
+            if (cloudProfile?.hasCustomAvatar && cloudProfile.avatar) {
+              resolvedAvatar = cloudProfile.avatar;
+            } else if (cloudProfile?.customAvatar) {
+              resolvedAvatar = cloudProfile.customAvatar;
+            } else if (isPrevCustom && prev.avatar) {
+              resolvedAvatar = prev.avatar;
+            } else if (cloudProfile?.avatar && !cloudProfile.avatar.includes('googleusercontent.com')) {
+              resolvedAvatar = cloudProfile.avatar;
+            } else if (cloudProfile?.avatar) {
+              resolvedAvatar = cloudProfile.avatar;
+            } else {
+              resolvedAvatar = firebaseUser.photoURL || getStudentAvatar(studentName);
+            }
+
+            const hasCustom = Boolean(
+              cloudProfile?.hasCustomAvatar ||
+              cloudProfile?.customAvatar ||
+              isPrevCustom ||
+              (resolvedAvatar && !resolvedAvatar.includes('googleusercontent.com'))
+            );
+
+            const updated: UserProfile = {
+              ...prev,
+              ...(cloudProfile || {}),
+              id: uid,
+              authUid: uid,
+              name: studentName,
+              email: firebaseUser.email || prev.email,
+              avatar: resolvedAvatar,
+              hasCustomAvatar: hasCustom,
+              customAvatar: hasCustom ? resolvedAvatar : (cloudProfile?.customAvatar || prev.customAvatar),
+              isAnonymous: firebaseUser.isAnonymous,
+            };
+
+            // If brand-new user without an existing document in Firestore, initialize it
+            if (!cloudProfile) {
+              syncUserProfileToFirestore(updated).catch(() => {});
+            }
+
+            saveStoredUser(updated);
+            return updated;
+          });
+
+          // Subscribe to real-time updates for users/{uid} across all devices
+          unsubProfileDoc = subscribeToUserProfile(uid, (liveProfile) => {
+            if (!liveProfile) return;
+            setUser((curr) => {
+              const merged: UserProfile = {
+                ...curr,
+                ...liveProfile,
+                id: uid,
+                authUid: uid,
+              };
+              saveStoredUser(merged);
+              return merged;
+            });
+          });
+
         } catch (err) {
-          console.warn('Could not fetch cloud profile:', err);
+          console.warn('Profile initialization error:', err);
+        } finally {
+          setIsSyncingProfile(false);
         }
-
-        setUser((prev) => {
-          const studentName = cloudProfile?.name || firebaseUser.displayName || prev.name || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'Student Scholar');
-          
-          // Determine avatar with strict priority:
-          // 1. Cloud profile custom avatar
-          // 2. Previously selected website avatar if custom
-          // 3. Cloud profile's existing avatar
-          // 4. Initial fallback: Google photoURL or deterministic avatar
-          let resolvedAvatar = '';
-          const isPrevCustom = prev.hasCustomAvatar || (prev.avatar && prev.id !== 'guest' && !prev.avatar.includes('googleusercontent.com'));
-
-          if (cloudProfile?.hasCustomAvatar && cloudProfile.avatar) {
-            resolvedAvatar = cloudProfile.avatar;
-          } else if (isPrevCustom && prev.avatar) {
-            resolvedAvatar = prev.avatar;
-          } else if (cloudProfile?.avatar && !cloudProfile.avatar.includes('googleusercontent.com')) {
-            resolvedAvatar = cloudProfile.avatar;
-          } else if (cloudProfile?.avatar) {
-            resolvedAvatar = cloudProfile.avatar;
-          } else {
-            resolvedAvatar = firebaseUser.photoURL || getStudentAvatar(studentName);
-          }
-
-          const hasCustom = Boolean(
-            cloudProfile?.hasCustomAvatar ||
-            isPrevCustom ||
-            (resolvedAvatar && !resolvedAvatar.includes('googleusercontent.com'))
-          );
-
-          const updated: UserProfile = {
-            ...prev,
-            ...(cloudProfile || {}),
-            id: firebaseUser.uid,
-            authUid: firebaseUser.uid,
-            name: studentName,
-            email: firebaseUser.email || undefined,
-            avatar: resolvedAvatar,
-            hasCustomAvatar: hasCustom,
-            customAvatar: hasCustom ? resolvedAvatar : (cloudProfile?.customAvatar || prev.customAvatar),
-            isAnonymous: firebaseUser.isAnonymous,
-          };
-
-          syncUserProfileToFirestore(updated).catch(() => {});
-          return updated;
-        });
+      } else {
+        // User logged out
+        setUser(GUEST_USER);
+        clearStoredUser();
       }
     });
-    return () => unsubscribe();
+
+    // Offline mode recovery listener
+    const handleOnline = () => {
+      if (auth.currentUser) {
+        setIsSyncingProfile(true);
+        fetchUserProfileFromFirestore(auth.currentUser.uid)
+          .then((liveProfile) => {
+            if (liveProfile) {
+              setUser((curr) => {
+                const merged = { ...curr, ...liveProfile, id: auth.currentUser!.uid, authUid: auth.currentUser!.uid };
+                saveStoredUser(merged);
+                return merged;
+              });
+            }
+          })
+          .catch(() => {})
+          .finally(() => setIsSyncingProfile(false));
+      }
+    };
+    window.addEventListener('online', handleOnline);
+
+    return () => {
+      unsubscribeAuth();
+      if (unsubProfileDoc) unsubProfileDoc();
+      window.removeEventListener('online', handleOnline);
+    };
   }, []);
 
   // Real-time Firestore sync for materials, solutions, and user-created groups
@@ -613,9 +679,21 @@ export default function App() {
     setGroups([]);
   };
 
-  // Handler: Update user profile
-  const handleSaveProfile = (updatedUser: UserProfile) => {
+  // Handler: Update user profile immediately in local state and Cloud Firestore
+  const handleSaveProfile = async (updatedUser: UserProfile) => {
+    // 1. Immediate optimistic local update
     setUser(updatedUser);
+    saveStoredUser(updatedUser);
+
+    // 2. Immediate persist to Cloud Firestore using UID
+    setIsSyncingProfile(true);
+    try {
+      await syncUserProfileToFirestore(updatedUser);
+    } catch (err) {
+      console.warn('Could not save profile to Cloud Firestore:', err);
+    } finally {
+      setIsSyncingProfile(false);
+    }
   };
 
   // Handler: Reset demo data
@@ -650,6 +728,7 @@ export default function App() {
         onSignOut={handleSignOut}
         theme={theme}
         onToggleTheme={handleToggleTheme}
+        isSyncingProfile={isSyncingProfile}
       />
 
       {/* Main Content Area */}
