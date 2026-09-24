@@ -1,4 +1,4 @@
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
   getFirestore, 
   collection, 
@@ -38,8 +38,8 @@ export const firebaseConfig = {
   measurementId: "G-FT7RJ13JMX"
 };
 
-// Initialize Firebase with config
-export const app = initializeApp(firebaseConfig);
+// Initialize Firebase only once
+export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
 // Initialize Auth with browser local persistence for session continuity across tabs and restarts
 export const auth = getAuth(app);
@@ -58,7 +58,7 @@ googleProvider.setCustomParameters({ prompt: 'select_account' });
 // Authentication Helpers
 // -------------------------------------------------------------
 
-// Active in-flight sign-in lock to prevent duplicate popup triggers and race conditions
+// Active in-flight sign-in lock to prevent duplicate popup triggers
 let inFlightGoogleSignIn: Promise<FirebaseUser> | null = null;
 
 export async function signInWithGoogle(): Promise<FirebaseUser> {
@@ -66,20 +66,19 @@ export async function signInWithGoogle(): Promise<FirebaseUser> {
     return inFlightGoogleSignIn;
   }
 
-  inFlightGoogleSignIn = (async () => {
-    try {
-      await setPersistence(auth, browserLocalPersistence).catch(() => {});
-      const result = await signInWithPopup(auth, googleProvider);
-      return result.user;
-    } catch (error: any) {
+  // Trigger popup synchronously to preserve user click gesture for instant popup launch
+  const signInPromise = signInWithPopup(auth, googleProvider)
+    .then((result) => result.user)
+    .catch((error) => {
       console.error('Google sign-in error:', error);
       throw error;
-    } finally {
+    })
+    .finally(() => {
       inFlightGoogleSignIn = null;
-    }
-  })();
+    });
 
-  return inFlightGoogleSignIn;
+  inFlightGoogleSignIn = signInPromise;
+  return signInPromise;
 }
 
 export async function registerWithEmail(email: string, pass: string, name: string) {
