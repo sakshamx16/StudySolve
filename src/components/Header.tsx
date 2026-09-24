@@ -135,7 +135,7 @@ export default function Header({
                     className="fixed inset-0 z-40"
                     onClick={() => setGroupDropdownOpen(false)}
                   />
-                  <div className="absolute left-0 mt-1 w-72 bg-white rounded-xl shadow-xl border border-stone-200 py-2 z-50 animate-in fade-in zoom-in-95">
+                  <div className="absolute left-0 mt-1 w-72 bg-white dark:bg-stone-900 rounded-xl shadow-xl border border-stone-200 dark:border-stone-800 py-2 z-50 animate-in fade-in zoom-in-95">
                     <div className="px-3 py-1.5 text-[11px] font-semibold text-stone-400 uppercase tracking-wider">
                       Switch Study Group
                     </div>
@@ -144,8 +144,8 @@ export default function Header({
                         onSelectGroup(null);
                         setGroupDropdownOpen(false);
                       }}
-                      className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-stone-50 transition-colors ${
-                        selectedGroupId === null ? 'bg-blue-50 font-semibold text-blue-700' : 'text-stone-700'
+                      className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-stone-50 dark:hover:bg-stone-800 transition-colors ${
+                        selectedGroupId === null ? 'bg-blue-50 dark:bg-blue-950/60 font-semibold text-blue-700 dark:text-blue-300' : 'text-stone-700 dark:text-stone-200'
                       }`}
                     >
                       <span className="flex items-center gap-2">
@@ -153,7 +153,7 @@ export default function Header({
                         All Study Groups ({groups.length})
                       </span>
                     </button>
-                    <div className="my-1 border-t border-stone-100" />
+                    <div className="my-1 border-t border-stone-100 dark:border-stone-800" />
                     {groups.map((group) => (
                       <button
                         key={group.id}
@@ -161,8 +161,8 @@ export default function Header({
                           onSelectGroup(group.id);
                           setGroupDropdownOpen(false);
                         }}
-                        className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-stone-50 transition-colors ${
-                          selectedGroupId === group.id ? 'bg-blue-50 font-semibold text-blue-700' : 'text-stone-700'
+                        className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-stone-50 dark:hover:bg-stone-800 transition-colors ${
+                          selectedGroupId === group.id ? 'bg-blue-50 dark:bg-blue-950/60 font-semibold text-blue-700 dark:text-blue-300' : 'text-stone-700 dark:text-stone-200'
                         }`}
                       >
                         <div className="flex items-center gap-2 truncate">
@@ -174,13 +174,13 @@ export default function Header({
                         </span>
                       </button>
                     ))}
-                    <div className="my-1 border-t border-stone-100" />
+                    <div className="my-1 border-t border-stone-100 dark:border-stone-800" />
                     <button
                       onClick={() => {
                         setGroupDropdownOpen(false);
                         onOpenCreateGroupModal();
                       }}
-                      className="w-full text-left px-3 py-2 text-xs text-blue-600 hover:bg-blue-50 font-medium flex items-center gap-1.5"
+                      className="w-full text-left px-3 py-2 text-xs text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/60 font-medium flex items-center gap-1.5"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       Create New Study Group

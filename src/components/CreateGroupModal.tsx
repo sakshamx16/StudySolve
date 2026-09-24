@@ -58,7 +58,8 @@ export default function CreateGroupModal({
       accentColor: '#3b82f6',
       isJoined: true,
       meetingFrequency,
-      leaderName: currentUser.name,
+      leaderName: currentUser.name || 'Peer Mentor',
+      createdByUid: currentUser.authUid || currentUser.id,
       createdAt: 'Just now',
     };
 

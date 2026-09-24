@@ -249,3 +249,10 @@ export async function addGroupToFirestore(group: StudyGroup): Promise<void> {
   const docRef = doc(db, 'study_groups', group.id);
   await setDoc(docRef, group);
 }
+
+// Delete study group from Firestore
+export async function deleteGroupFromFirestore(groupId: string): Promise<void> {
+  const docRef = doc(db, 'study_groups', groupId);
+  await deleteDoc(docRef);
+}
+

@@ -63,11 +63,13 @@ export default function AuthModal({
       onAuthSuccess(updatedProfile);
       onClose();
     } catch (err: any) {
-      console.error(err);
-      if (err.code === 'auth/popup-blocked') {
-        setError('Popup was blocked by browser. Please allow popups or use Email login.');
-      } else if (err.code === 'auth/cancelled-popup-request') {
-        setError('Login cancelled.');
+      console.error('Google sign-in error:', err);
+      if (err.code === 'auth/unauthorized-domain') {
+        setError('This domain is not yet authorized in Firebase Authentication. Please ensure "studysolve.site" and "www.studysolve.site" are added under Firebase Console → Authentication → Settings → Authorized domains.');
+      } else if (err.code === 'auth/popup-blocked') {
+        setError('Sign-in popup was blocked by browser. Please allow popups for studysolve.site, or use Email & Password.');
+      } else if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
+        setError('Sign-in popup was closed before completion. You can try again whenever ready.');
       } else {
         setError(err.message || 'Failed to sign in with Google. You can use Email/Password.');
       }

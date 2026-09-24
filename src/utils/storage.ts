@@ -6,17 +6,35 @@ const MATERIALS_STORAGE_KEY = 'studysolve_v2_materials';
 const SOLUTIONS_STORAGE_KEY = 'studysolve_v2_solutions';
 const USER_STORAGE_KEY = 'studysolve_v2_user';
 
+const LEGACY_DUMMY_GROUP_IDS = [
+  'grp-accounting',
+  'grp-taxation',
+  'grp-economics',
+  'grp-costing',
+  'grp-finance',
+  'grp-law'
+];
+
 export function getStoredGroups(): StudyGroup[] {
   try {
     const raw = localStorage.getItem(GROUPS_STORAGE_KEY);
     if (!raw) {
-      localStorage.setItem(GROUPS_STORAGE_KEY, JSON.stringify(initialGroups));
-      return initialGroups;
+      localStorage.setItem(GROUPS_STORAGE_KEY, JSON.stringify([]));
+      return [];
     }
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    // Filter out any legacy dummy groups
+    const sanitized = parsed.filter((g) => g && !LEGACY_DUMMY_GROUP_IDS.includes(g.id));
+    if (sanitized.length !== parsed.length) {
+      localStorage.setItem(GROUPS_STORAGE_KEY, JSON.stringify(sanitized));
+    }
+    return sanitized;
   } catch (err) {
-    console.warn('Error reading groups from storage, using defaults', err);
-    return initialGroups;
+    console.warn('Error reading groups from storage', err);
+    return [];
   }
 }
 

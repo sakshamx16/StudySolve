@@ -60,9 +60,12 @@ import {
   signOutUser, 
   subscribeToFirestoreMaterials, 
   subscribeToFirestoreSolutions, 
+  subscribeToFirestoreGroups,
   addMaterialToFirestore, 
   deleteMaterialFromFirestore, 
   addSolutionToFirestore, 
+  addGroupToFirestore,
+  deleteGroupFromFirestore,
   syncUserProfileToFirestore 
 } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -183,8 +186,30 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Real-time Firestore sync for materials and solutions
+  // Real-time Firestore sync for materials, solutions, and user-created groups
   useEffect(() => {
+    const LEGACY_DUMMY_GROUP_IDS = [
+      'grp-accounting',
+      'grp-taxation',
+      'grp-economics',
+      'grp-costing',
+      'grp-finance',
+      'grp-law'
+    ];
+
+    const unsubGroups = subscribeToFirestoreGroups((liveGroups) => {
+      if (liveGroups && Array.isArray(liveGroups)) {
+        // Automatically delete any lingering legacy dummy groups if found in Firestore
+        liveGroups.forEach((g) => {
+          if (LEGACY_DUMMY_GROUP_IDS.includes(g.id)) {
+            deleteGroupFromFirestore(g.id).catch(() => {});
+          }
+        });
+        const valid = liveGroups.filter((g) => !LEGACY_DUMMY_GROUP_IDS.includes(g.id));
+        setGroups(valid);
+      }
+    });
+
     const unsubMaterials = subscribeToFirestoreMaterials((liveMaterials) => {
       if (liveMaterials && liveMaterials.length > 0) {
         setMaterials(liveMaterials);
@@ -198,6 +223,7 @@ export default function App() {
     });
 
     return () => {
+      unsubGroups();
       unsubMaterials();
       unsubSolutions();
     };
@@ -509,18 +535,23 @@ export default function App() {
       prev.map((g) => {
         if (g.id !== groupId) return g;
         const nowJoined = !g.isJoined;
-        return {
+        const updated: StudyGroup = {
           ...g,
           isJoined: nowJoined,
           memberCount: nowJoined ? g.memberCount + 1 : Math.max(1, g.memberCount - 1),
         };
+        addGroupToFirestore(updated).catch(() => {});
+        return updated;
       })
     );
   };
 
   // Handler: Add new group
   const handleAddGroup = (newGroup: StudyGroup) => {
-    setGroups((prev) => [newGroup, ...prev]);
+    setGroups((prev) => [newGroup, ...prev.filter((g) => g.id !== newGroup.id)]);
+    addGroupToFirestore(newGroup).catch((err) => {
+      console.warn('Could not save group to Firestore:', err);
+    });
   };
 
   // Handler: Delete study group
@@ -533,11 +564,14 @@ export default function App() {
       ...prev,
       joinedGroupIds: prev.joinedGroupIds.filter((id) => id !== groupId),
     }));
+    deleteGroupFromFirestore(groupId).catch((err) => {
+      console.warn('Could not delete group from Firestore:', err);
+    });
   };
 
-  // Handler: Restore default groups
+  // Handler: Restore default groups (clean empty state)
   const handleRestoreDefaultGroups = () => {
-    setGroups(initialGroups);
+    setGroups([]);
   };
 
   // Handler: Update user profile

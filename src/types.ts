@@ -27,6 +27,7 @@ export interface StudyGroup {
   isJoined: boolean;
   meetingFrequency?: string;
   leaderName: string;
+  createdByUid?: string;
   createdAt: string;
 }
 
