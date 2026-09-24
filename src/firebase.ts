@@ -23,8 +23,18 @@ import {
   updateProfile,
   User as FirebaseUser
 } from 'firebase/auth';
-import firebaseConfig from '../firebase-applet-config.json';
 import { StudyMaterial, Solution, StudyGroup, UserProfile } from './types';
+
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+export const firebaseConfig = {
+  apiKey: "AIzaSyCjtZbOBkxMqZh7WHGjAjX6rimtqgbXpeo",
+  authDomain: "studysolve-bdec1.firebaseapp.com",
+  projectId: "studysolve-bdec1",
+  storageBucket: "studysolve-bdec1.firebasestorage.app",
+  messagingSenderId: "891319907963",
+  appId: "1:891319907963:web:3bfd55b4a4dcd1f26814de",
+  measurementId: "G-FT7RJ13JMX"
+};
 
 // Initialize Firebase with config
 export const app = initializeApp(firebaseConfig);
@@ -32,10 +42,8 @@ export const app = initializeApp(firebaseConfig);
 // Initialize Auth
 export const auth = getAuth(app);
 
-// Initialize Firestore (supports custom database ID or standard default database)
-export const db = (firebaseConfig as any).firestoreDatabaseId
-  ? getFirestore(app, (firebaseConfig as any).firestoreDatabaseId)
-  : getFirestore(app);
+// Initialize Firestore
+export const db = getFirestore(app);
 
 // Google Auth Provider
 export const googleProvider = new GoogleAuthProvider();

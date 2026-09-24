@@ -1,12 +1,9 @@
 {
-  "projectId": "massive-display-0vxch",
-  "appId": "1:75289785962:web:ebbb848ea258d7b7be7c13",
-  "apiKey": "AIzaSyBRid4i1SV6_j9_xzpXHO2ta4R5QRHSxtE",
-  "authDomain": "massive-display-0vxch.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-studysolve-c4fae8bf-3bfb-4322-a5a0-c7a91ba22483",
-  "storageBucket": "massive-display-0vxch.firebasestorage.app",
-  "messagingSenderId": "75289785962",
-  "measurementId": "",
-  "oAuthClientId": "75289785962-glcc2dteb46cr3js6mr24c6k9bqbn2n3.apps.googleusercontent.com",
-  "recaptchaSiteKey": ""
+  "projectId": "studysolve-bdec1",
+  "appId": "1:891319907963:web:3bfd55b4a4dcd1f26814de",
+  "apiKey": "AIzaSyCjtZbOBkxMqZh7WHGjAjX6rimtqgbXpeo",
+  "authDomain": "studysolve-bdec1.firebaseapp.com",
+  "storageBucket": "studysolve-bdec1.firebasestorage.app",
+  "messagingSenderId": "891319907963",
+  "measurementId": "G-FT7RJ13JMX"
 }
