@@ -189,86 +189,87 @@ export default function App() {
       const uid = firebaseUser.uid;
       activeAuthUid = uid;
 
-      // 2. Fast local hydration: If cached profile matches this UID, display it immediately
+      // 2. INSTANT LOGIN: Hydrate and set user state immediately (under 1 second)
       const cachedUser = getStoredUser();
-      if (cachedUser && (cachedUser.id === uid || cachedUser.authUid === uid)) {
-        setUser(cachedUser);
-      }
+      const hasCached = cachedUser && (cachedUser.id === uid || cachedUser.authUid === uid);
+      const studentName = (hasCached && cachedUser.name)
+        ? cachedUser.name
+        : (firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'Student Scholar'));
+      const studentAvatar = (hasCached && cachedUser.hasCustomAvatar && cachedUser.avatar)
+        ? cachedUser.avatar
+        : (firebaseUser.photoURL || getStudentAvatar(studentName));
 
-      // 3. Show "Syncing Profile" while fetching the cloud record
-      setIsSyncingProfile(true);
+      const immediateUser: UserProfile = {
+        ...GUEST_USER,
+        ...(hasCached ? cachedUser : {}),
+        id: uid,
+        authUid: uid,
+        name: studentName,
+        email: firebaseUser.email || undefined,
+        avatar: studentAvatar,
+        hasCustomAvatar: Boolean(hasCached && cachedUser.hasCustomAvatar),
+        customAvatar: hasCached ? cachedUser.customAvatar : undefined,
+        isAnonymous: firebaseUser.isAnonymous,
+      };
 
-      try {
-        // Fetch the profile ONCE during login from Cloud Firestore
-        const cloudProfile = await fetchUserProfileFromFirestore(uid);
+      // Set user immediately so login is instant
+      setUser(immediateUser);
+      saveStoredUser(immediateUser);
 
-        // Guard against auth state changing during the async fetch
-        if (activeAuthUid !== uid) return;
+      // 3. Fast cloud profile check & real-time sync (non-blocking)
+      (async () => {
+        try {
+          // Fast check with max 2s timeout so login never hangs
+          const cloudProfile = await Promise.race([
+            fetchUserProfileFromFirestore(uid),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000))
+          ]);
 
-        let resolvedUser: UserProfile;
-
-        if (cloudProfile) {
-          // Cloud profile exists (e.g. edited on Device A) — adopt it completely!
-          // NEVER overwrite with default credentials
-          resolvedUser = {
-            ...GUEST_USER,
-            ...cloudProfile,
-            id: uid,
-            authUid: uid,
-            email: firebaseUser.email || cloudProfile.email,
-            isAnonymous: firebaseUser.isAnonymous,
-          };
-        } else {
-          // First-time user registration: create initial profile document
-          const defaultName = firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'Student Scholar');
-          const defaultAvatar = firebaseUser.photoURL || getStudentAvatar(defaultName);
-          resolvedUser = {
-            ...GUEST_USER,
-            id: uid,
-            authUid: uid,
-            name: defaultName,
-            email: firebaseUser.email || undefined,
-            avatar: defaultAvatar,
-            isAnonymous: firebaseUser.isAnonymous,
-          };
-          await syncUserProfileToFirestore(resolvedUser).catch(() => {});
-        }
-
-        if (activeAuthUid === uid) {
-          setUser(resolvedUser);
-          saveStoredUser(resolvedUser);
-        }
-
-        // 4. STOP the loading spinner immediately after the initial profile is loaded!
-        setIsSyncingProfile(false);
-
-        // 5. Establish a SINGLE real-time Firestore listener for subsequent cross-device edits
-        unsubProfileDoc = subscribeToUserProfile(
-          uid,
-          (liveProfile) => {
-            if (activeAuthUid !== uid || !liveProfile) return;
+          if (cloudProfile && activeAuthUid === uid) {
             setUser((prev) => {
-              const merged: UserProfile = {
+              const resolved: UserProfile = {
                 ...prev,
-                ...liveProfile,
+                ...cloudProfile,
                 id: uid,
                 authUid: uid,
+                email: firebaseUser.email || cloudProfile.email || prev.email,
+                isAnonymous: firebaseUser.isAnonymous,
               };
-              saveStoredUser(merged);
-              return merged;
+              saveStoredUser(resolved);
+              return resolved;
             });
-          },
-          (err) => {
-            console.warn('Real-time profile sync notice:', err);
+          } else if (!cloudProfile && !hasCached) {
+            // First time ever: initialize Firestore document in background
+            syncUserProfileToFirestore(immediateUser).catch(() => {});
           }
-        );
-
-      } catch (err) {
-        console.warn('Profile fetch notice:', err);
-        if (activeAuthUid === uid) {
-          setIsSyncingProfile(false);
+        } catch (err) {
+          console.warn('Profile fetch notice:', err);
+        } finally {
+          if (activeAuthUid === uid) {
+            setIsSyncingProfile(false);
+          }
         }
-      }
+
+        // 4. Attach real-time listener for subsequent cross-device edits
+        if (activeAuthUid === uid && !unsubProfileDoc) {
+          unsubProfileDoc = subscribeToUserProfile(
+            uid,
+            (liveProfile) => {
+              if (activeAuthUid !== uid || !liveProfile) return;
+              setUser((prev) => {
+                const merged: UserProfile = {
+                  ...prev,
+                  ...liveProfile,
+                  id: uid,
+                  authUid: uid,
+                };
+                saveStoredUser(merged);
+                return merged;
+              });
+            }
+          );
+        }
+      })();
     });
 
     // Offline mode recovery listener
@@ -695,10 +696,13 @@ export default function App() {
     setUser(updatedUser);
     saveStoredUser(updatedUser);
 
-    // 2. Immediate persist to Cloud Firestore using UID
+    // 2. Immediate persist to Cloud Firestore with safety timeout so UI never hangs in "syncing"
     setIsSyncingProfile(true);
     try {
-      await syncUserProfileToFirestore(updatedUser);
+      await Promise.race([
+        syncUserProfileToFirestore(updatedUser),
+        new Promise((resolve) => setTimeout(resolve, 1500))
+      ]);
     } catch (err) {
       console.warn('Could not save profile to Cloud Firestore:', err);
     } finally {

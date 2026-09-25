@@ -187,6 +187,7 @@ export default function EditProfileModal({
 
     try {
       await onUpdateUser(updated);
+      setIsSaving(false);
       setIsSaved(true);
 
       try {
@@ -201,7 +202,6 @@ export default function EditProfileModal({
 
       setTimeout(() => {
         setIsSaved(false);
-        setIsSaving(false);
         onClose();
       }, 500);
     } catch (err) {
