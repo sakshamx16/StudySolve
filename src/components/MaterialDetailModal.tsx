@@ -42,11 +42,11 @@ export default function MaterialDetailModal({
   onVoteHelpful,
   onDeleteMaterial,
 }: MaterialDetailModalProps) {
-  if (!material) return null;
-
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [solutionTypeFilter, setSolutionTypeFilter] = useState<'all' | 'pdf' | 'image' | 'video'>('all');
   const [sortBy, setSortBy] = useState<'rating' | 'newest' | 'helpful'>('rating');
+
+  if (!material) return null;
 
   // Filter solutions for this material
   const materialSolutions = solutions.filter((s) => s.materialId === material.id);

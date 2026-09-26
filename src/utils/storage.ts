@@ -90,8 +90,48 @@ export function saveStoredSolutions(solutions: Solution[]): void {
   }
 }
 
-export function getStoredUser(): UserProfile {
+const ACCOUNT_USER_PREFIX = 'studysolve_user_';
+
+export function getStoredUser(accountKey?: string): UserProfile {
   try {
+    // 1. If an accountKey (UID or email) is provided, check account-specific cache first
+    if (accountKey && accountKey !== 'guest') {
+      const sanitizedKey = accountKey.toLowerCase().trim();
+      const directKey = `${ACCOUNT_USER_PREFIX}${sanitizedKey}`;
+      const directRaw = localStorage.getItem(directKey) || localStorage.getItem(`${ACCOUNT_USER_PREFIX}${accountKey}`);
+      if (directRaw) {
+        const parsed = JSON.parse(directRaw);
+        if (parsed && parsed.name && parsed.id !== 'guest') {
+          return parsed;
+        }
+      }
+
+      // Check all cached accounts for matching id, authUid, or email
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith(ACCOUNT_USER_PREFIX)) {
+          try {
+            const rawVal = localStorage.getItem(key);
+            if (rawVal) {
+              const u = JSON.parse(rawVal);
+              if (
+                u &&
+                u.name &&
+                (u.id === accountKey ||
+                 u.authUid === accountKey ||
+                 (u.email && u.email.toLowerCase().trim() === sanitizedKey))
+              ) {
+                return u;
+              }
+            }
+          } catch {
+            // ignore JSON parse error for corrupt item
+          }
+        }
+      }
+    }
+
+    // 2. Fall back to current active session storage
     const raw = localStorage.getItem(USER_STORAGE_KEY);
     if (!raw) {
       return GUEST_USER;
@@ -106,6 +146,15 @@ export function getStoredUser(): UserProfile {
     if (!parsed || !parsed.name) {
       return GUEST_USER;
     }
+
+    // If an accountKey was provided and active session doesn't match it, don't use wrong user
+    if (accountKey && accountKey !== 'guest') {
+      const match = parsed.id === accountKey || parsed.authUid === accountKey || (parsed.email && parsed.email.toLowerCase().trim() === accountKey.toLowerCase().trim());
+      if (!match) {
+        return GUEST_USER;
+      }
+    }
+
     return parsed;
   } catch (err) {
     console.warn('Error reading user from storage', err);
@@ -116,10 +165,26 @@ export function getStoredUser(): UserProfile {
 export function saveStoredUser(user: UserProfile): void {
   try {
     if (!user || !user.name || user.id === 'guest') {
-      localStorage.removeItem(USER_STORAGE_KEY);
       return;
     }
-    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+
+    const serialized = JSON.stringify(user);
+
+    // Save as current active session
+    localStorage.setItem(USER_STORAGE_KEY, serialized);
+
+    // Save under user UID
+    if (user.id && user.id !== 'guest') {
+      localStorage.setItem(`${ACCOUNT_USER_PREFIX}${user.id}`, serialized);
+    }
+    if (user.authUid && user.authUid !== 'guest' && user.authUid !== user.id) {
+      localStorage.setItem(`${ACCOUNT_USER_PREFIX}${user.authUid}`, serialized);
+    }
+
+    // Save under user email
+    if (user.email && user.email.trim()) {
+      localStorage.setItem(`${ACCOUNT_USER_PREFIX}${user.email.toLowerCase().trim()}`, serialized);
+    }
   } catch (err) {
     console.error('Error saving user to storage', err);
   }
@@ -127,6 +192,7 @@ export function saveStoredUser(user: UserProfile): void {
 
 export function clearStoredUser(): void {
   try {
+    // Only clears active session pointer; keeps account backups so logging back into the same account recovers profile
     localStorage.removeItem(USER_STORAGE_KEY);
   } catch (err) {
     console.warn('Error clearing stored user', err);

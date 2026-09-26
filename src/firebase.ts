@@ -1,6 +1,9 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
   getFirestore, 
+  initializeFirestore,
+  setLogLevel,
+  Firestore,
   collection, 
   doc, 
   setDoc, 
@@ -47,8 +50,24 @@ setPersistence(auth, browserLocalPersistence).catch((err) => {
   console.warn('Auth session persistence initialization notice:', err);
 });
 
-// Initialize Firestore
-export const db = getFirestore(app);
+// Suppress benign internal WebChannel reconnect stream warnings
+try {
+  setLogLevel('error');
+} catch {
+  // ignore
+}
+
+// Initialize Firestore with auto-detect long polling and undefined property skipping
+let firestoreDb: Firestore;
+try {
+  firestoreDb = initializeFirestore(app, {
+    experimentalAutoDetectLongPolling: true,
+    ignoreUndefinedProperties: true,
+  });
+} catch {
+  firestoreDb = getFirestore(app);
+}
+export const db = firestoreDb;
 
 // Google Auth Provider - reused singleton instance
 export const googleProvider = new GoogleAuthProvider();
@@ -70,7 +89,11 @@ export async function signInWithGoogle(): Promise<FirebaseUser> {
   const signInPromise = signInWithPopup(auth, googleProvider)
     .then((result) => result.user)
     .catch((error) => {
-      console.error('Google sign-in error:', error);
+      if (error?.code === 'auth/unauthorized-domain') {
+        console.warn('Google sign-in requires domain authorization in Firebase Console for:', typeof window !== 'undefined' ? window.location.hostname : 'current domain');
+      } else {
+        console.error('Google sign-in error:', error);
+      }
       throw error;
     })
     .finally(() => {
@@ -119,20 +142,56 @@ export async function syncUserProfileToFirestore(profile: UserProfile): Promise<
     if (!targetUid || targetUid === 'guest') return;
 
     const userRef = doc(db, 'users', targetUid);
-    const dataToSave: Partial<UserProfile> & { updatedAt: string } = {
-      ...profile,
+    
+    // Explicitly define document data without any undefined fields (prevents Firestore rejection)
+    const dataToSave: Record<string, any> = {
       id: targetUid,
       authUid: targetUid,
+      name: (profile.name || '').trim(),
+      avatar: profile.avatar || '',
+      gradeLevel: (profile.gradeLevel || 'Commerce Student (B.Com / CA Aspirant)').trim(),
+      points: typeof profile.points === 'number' ? profile.points : 0,
+      solutionsSubmitted: profile.solutionsSubmitted || 0,
+      materialsShared: profile.materialsShared || 0,
+      joinedGroupIds: Array.isArray(profile.joinedGroupIds) ? profile.joinedGroupIds : [],
+      courses: Array.isArray(profile.courses) ? profile.courses : [],
+      bio: (profile.bio || '').trim(),
       updatedAt: new Date().toISOString(),
     };
 
-    // If user has a custom website avatar, preserve it
-    if (profile.avatar && !profile.avatar.includes('googleusercontent.com')) {
-      dataToSave.hasCustomAvatar = true;
-      dataToSave.customAvatar = profile.avatar;
+    // Determine custom avatar flag
+    const isCustom = Boolean(
+      profile.hasCustomAvatar ||
+      profile.customAvatar ||
+      (profile.avatar && !profile.avatar.includes('googleusercontent.com'))
+    );
+    dataToSave.hasCustomAvatar = isCustom;
+
+    if (isCustom) {
+      dataToSave.customAvatar = profile.customAvatar || profile.avatar;
+    }
+
+    if (profile.email) {
+      dataToSave.email = profile.email;
+    }
+
+    if (profile.isAnonymous !== undefined) {
+      dataToSave.isAnonymous = profile.isAnonymous;
     }
 
     await setDoc(userRef, dataToSave, { merge: true });
+
+    // Also update Firebase Auth local user profile so onAuthStateChanged stays in sync
+    if (auth.currentUser && auth.currentUser.uid === targetUid) {
+      try {
+        await updateProfile(auth.currentUser, {
+          displayName: dataToSave.name,
+          photoURL: dataToSave.avatar,
+        });
+      } catch {
+        // Non-critical local auth profile notice
+      }
+    }
   } catch (err) {
     console.warn('Could not sync user profile to Firestore:', err);
     throw err;
@@ -149,8 +208,12 @@ export async function fetchUserProfileFromFirestore(uid: string): Promise<UserPr
       return { id: snap.id, authUid: snap.id, ...snap.data() } as UserProfile;
     }
     return null;
-  } catch (err) {
-    console.warn('Could not fetch user profile from Firestore:', err);
+  } catch (err: any) {
+    if (err?.message?.includes('offline') || err?.code === 'unavailable') {
+      console.info('Firestore client reconnecting; active session preserved.');
+    } else {
+      console.warn('Could not fetch user profile from Firestore:', err);
+    }
     return null;
   }
 }

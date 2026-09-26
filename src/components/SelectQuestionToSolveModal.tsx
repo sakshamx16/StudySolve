@@ -28,10 +28,10 @@ export default function SelectQuestionToSolveModal({
   solutions,
   onSelectMaterialToSolve,
 }: SelectQuestionToSolveModalProps) {
-  if (!isOpen) return null;
-
   const [query, setQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'needs-solution'>('needs-solution');
+
+  if (!isOpen) return null;
 
   // Filter materials
   const filtered = materials.filter((m) => {

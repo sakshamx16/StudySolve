@@ -2,6 +2,27 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      (function() {
+        var isWsNotice = function(val) {
+          if (!val) return false;
+          var str = String(val.message || val.reason || val || '');
+          return str.indexOf('WebSocket') !== -1 || str.indexOf('[vite]') !== -1;
+        };
+        window.addEventListener('unhandledrejection', function(e) {
+          if (isWsNotice(e.reason)) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+          }
+        }, true);
+        window.addEventListener('error', function(e) {
+          if (isWsNotice(e.error) || isWsNotice(e.message)) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+          }
+        }, true);
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>StudySolve - Collaborative Study Materials & Solution Hub</title>
     <meta name="description" content="Collaborative study and solution exchange: Financial Accounting, Taxation, Costing, Economics, and Business Studies with verified PDF, image, and video walkthroughs." />

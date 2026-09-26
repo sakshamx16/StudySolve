@@ -61,8 +61,6 @@ export default function PostSolutionModal({
   onSubmitSolution,
   currentUser,
 }: PostSolutionModalProps) {
-  if (!material) return null;
-
   const [solutionType, setSolutionType] = useState<SolutionMediaType>('pdf');
   const [title, setTitle] = useState('');
   const [keyTakeaway, setKeyTakeaway] = useState('');
@@ -162,6 +160,7 @@ export default function PostSolutionModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!material) return;
 
     // Fallback media URL if not uploaded
     let finalMediaUrl = mediaUrl;
@@ -224,6 +223,8 @@ export default function PostSolutionModal({
 
     onClose();
   };
+
+  if (!material) return null;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-stone-950/70 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">

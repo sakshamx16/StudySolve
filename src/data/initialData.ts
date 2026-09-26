@@ -4,7 +4,7 @@ export const GUEST_USER: UserProfile = {
   id: 'guest',
   name: '',
   avatar: '',
-  gradeLevel: 'Student Scholar',
+  gradeLevel: 'Commerce Student (B.Com / CA Aspirant)',
   courses: ['Financial Accounting', 'Corporate Law', 'Direct Taxation', 'Macroeconomics'],
   bio: '',
   points: 0,

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   X, 
   User, 
@@ -12,11 +12,13 @@ import {
   Trash2,
   Camera,
   RotateCcw,
-  Loader2
+  Loader2,
+  UserCheck
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { UserProfile } from '../types';
 import { getStudentAvatar } from '../utils/avatar';
+import { auth } from '../firebase';
 
 interface EditProfileModalProps {
   isOpen: boolean;
@@ -108,11 +110,13 @@ export default function EditProfileModal({
   currentUser,
   onUpdateUser,
 }: EditProfileModalProps) {
-  if (!isOpen) return null;
-
-  const [name, setName] = useState(currentUser.name);
-  const [avatar, setAvatar] = useState(currentUser.avatar);
-  const [gradeLevel, setGradeLevel] = useState(currentUser.gradeLevel || 'Undergraduate Student (B.Com / CA Aspirant)');
+  const [name, setName] = useState(currentUser.name || '');
+  const [avatar, setAvatar] = useState(currentUser.avatar || getStudentAvatar(currentUser.name));
+  const [gradeLevel, setGradeLevel] = useState(
+    currentUser.gradeLevel && currentUser.gradeLevel.trim() !== 'Student Scholar'
+      ? currentUser.gradeLevel.trim()
+      : 'Undergraduate Student (B.Com / CA Aspirant)'
+  );
   const [courses, setCourses] = useState<string[]>(
     currentUser.courses && currentUser.courses.length > 0
       ? currentUser.courses
@@ -121,12 +125,46 @@ export default function EditProfileModal({
   const [bio, setBio] = useState(currentUser.bio || '');
   const [newCourseInput, setNewCourseInput] = useState('');
   const [customImageUrl, setCustomImageUrl] = useState('');
-  const [avatarMode, setAvatarMode] = useState<'preset' | 'custom'>('preset');
+  const [avatarMode, setAvatarMode] = useState<'student' | 'preset' | 'custom'>('student');
   const [isSaved, setIsSaved] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Sync state whenever modal opens or currentUser updates
+  useEffect(() => {
+    if (isOpen) {
+      setName(currentUser.name || '');
+      setAvatar(currentUser.avatar || getStudentAvatar(currentUser.name));
+      setGradeLevel(
+        currentUser.gradeLevel && currentUser.gradeLevel.trim() !== 'Student Scholar'
+          ? currentUser.gradeLevel.trim()
+          : 'Undergraduate Student (B.Com / CA Aspirant)'
+      );
+      setCourses(
+        currentUser.courses && currentUser.courses.length > 0
+          ? currentUser.courses
+          : ['Financial Accounting', 'Corporate Law', 'Direct Taxation']
+      );
+      setBio(currentUser.bio || '');
+      setIsSaved(false);
+      setIsSaving(false);
+    }
+  }, [isOpen, currentUser]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const googlePhotoUrl = auth.currentUser?.photoURL;
 
-  // Handle local file upload (profile picture)
+  // Dynamic Solver Level Calculation based on authentic verified XP
+  const userPoints = currentUser.points || 0;
+  const solverLevel = Math.max(1, Math.floor(userPoints / 100) + 1);
+  const solverTitle = solverLevel === 1 
+    ? 'Scholar' 
+    : solverLevel === 2 
+      ? 'Rising Solver' 
+      : solverLevel === 3 
+        ? 'Peer Mentor' 
+        : 'Master Solver';
+
+  // Handle local file upload (profile picture) with automatic canvas compression for instant cloud sync
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -136,9 +174,38 @@ export default function EditProfileModal({
       }
       const reader = new FileReader();
       reader.onload = (event) => {
-        if (event.target?.result) {
-          setAvatar(event.target.result as string);
-        }
+        const rawResult = event.target?.result as string;
+        if (!rawResult) return;
+
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_DIM = 256;
+          let width = img.width;
+          let height = img.height;
+          if (width > height) {
+            if (width > MAX_DIM) {
+              height = Math.round((height * MAX_DIM) / width);
+              width = MAX_DIM;
+            }
+          } else {
+            if (height > MAX_DIM) {
+              width = Math.round((width * MAX_DIM) / height);
+              height = MAX_DIM;
+            }
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            const compressed = canvas.toDataURL('image/jpeg', 0.85);
+            setAvatar(compressed);
+          } else {
+            setAvatar(rawResult);
+          }
+        };
+        img.src = rawResult;
       };
       reader.readAsDataURL(file);
     }
@@ -166,49 +233,53 @@ export default function EditProfileModal({
     }
   };
 
-  const [isSaving, setIsSaving] = useState(false);
-
   // Submit profile changes
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || isSaving) return;
 
-    setIsSaving(true);
+    const trimmedName = name.trim();
+    const finalAvatar = avatar && avatar.trim() ? avatar.trim() : getStudentAvatar(trimmedName);
+
     const updated: UserProfile = {
       ...currentUser,
-      name: name.trim(),
-      avatar,
+      name: trimmedName,
+      avatar: finalAvatar,
       hasCustomAvatar: true,
-      customAvatar: avatar,
+      customAvatar: finalAvatar,
       gradeLevel: gradeLevel.trim(),
       courses,
       bio: bio.trim(),
     };
 
+    // Instant UI confirmation - no waiting for network round-trip!
+    setIsSaved(true);
+    setIsSaving(false);
+
     try {
-      await onUpdateUser(updated);
-      setIsSaving(false);
-      setIsSaved(true);
-
-      try {
-        confetti({
-          particleCount: 50,
-          spread: 60,
-          origin: { y: 0.7 },
-        });
-      } catch {
-        // ignore
-      }
-
-      setTimeout(() => {
-        setIsSaved(false);
-        onClose();
-      }, 500);
-    } catch (err) {
-      console.error('Failed to sync profile:', err);
-      setIsSaving(false);
+      confetti({
+        particleCount: 50,
+        spread: 60,
+        origin: { y: 0.7 },
+      });
+    } catch {
+      // ignore
     }
+
+    try {
+      // Fire update to parent (persists to localStorage + Cloud Firestore)
+      await onUpdateUser(updated);
+    } catch (err) {
+      console.warn('Background sync note:', err);
+    }
+
+    setTimeout(() => {
+      setIsSaved(false);
+      onClose();
+    }, 450);
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
@@ -263,7 +334,7 @@ export default function EditProfileModal({
                   {name || 'Student Name'}
                 </h3>
                 <span className="text-[10px] font-semibold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
-                  Level 4 Solver • {currentUser.points} XP
+                  Level {solverLevel} {solverTitle} • {userPoints} XP
                 </span>
               </div>
               <p className="text-xs text-stone-600 font-medium truncate mt-0.5">
@@ -335,12 +406,23 @@ export default function EditProfileModal({
                 </p>
               </div>
 
-              {/* Toggle presets vs upload */}
+              {/* Toggle avatar modes */}
               <div className="flex items-center p-1 bg-stone-100 rounded-xl">
                 <button
                   type="button"
+                  onClick={() => setAvatarMode('student')}
+                  className={`px-2.5 sm:px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                    avatarMode === 'student'
+                      ? 'bg-white text-stone-900 shadow-xs'
+                      : 'text-stone-500 hover:text-stone-800'
+                  }`}
+                >
+                  Scholar Badge
+                </button>
+                <button
+                  type="button"
                   onClick={() => setAvatarMode('preset')}
-                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                  className={`px-2.5 sm:px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
                     avatarMode === 'preset'
                       ? 'bg-white text-stone-900 shadow-xs'
                       : 'text-stone-500 hover:text-stone-800'
@@ -351,18 +433,78 @@ export default function EditProfileModal({
                 <button
                   type="button"
                   onClick={() => setAvatarMode('custom')}
-                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                  className={`px-2.5 sm:px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
                     avatarMode === 'custom'
                       ? 'bg-white text-stone-900 shadow-xs'
                       : 'text-stone-500 hover:text-stone-800'
                   }`}
                 >
-                  Custom Photo
+                  Upload Photo
                 </button>
               </div>
             </div>
 
-            {avatarMode === 'preset' ? (
+            {/* Quick Action Badges */}
+            <div className="flex flex-wrap items-center gap-2 pt-1 pb-1">
+              <button
+                type="button"
+                onClick={() => setAvatar(getStudentAvatar(name))}
+                className="px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-medium border border-blue-200 flex items-center gap-1.5 transition-colors"
+                title="Use clean student initial avatar"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-blue-600" />
+                <span>Use Student Initial Avatar</span>
+              </button>
+
+              {googlePhotoUrl && (
+                <button
+                  type="button"
+                  onClick={() => setAvatar(googlePhotoUrl)}
+                  className="px-2.5 py-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-medium border border-stone-200 flex items-center gap-1.5 transition-colors"
+                  title="Use your Google profile picture"
+                >
+                  <img
+                    src={googlePhotoUrl}
+                    alt="Google"
+                    className="w-3.5 h-3.5 rounded-full object-cover aspect-square"
+                    referrerPolicy="no-referrer"
+                  />
+                  <span>Use Google Account Photo</span>
+                </button>
+              )}
+            </div>
+
+            {avatarMode === 'student' ? (
+              <div className="bg-stone-50 p-4 rounded-2xl border border-stone-200/80 space-y-3">
+                <div className="text-xs font-semibold text-stone-800 flex items-center gap-2">
+                  <UserCheck className="w-4 h-4 text-blue-600" />
+                  <span>Academic Student Scholar Badge</span>
+                </div>
+                <p className="text-xs text-stone-500">
+                  A clean, high-contrast student badge generated from your initials. Privacy-first, no tracking, and looks sharp across study materials and solution rankings.
+                </p>
+                <div className="flex items-center gap-3 pt-1">
+                  <img
+                    src={getStudentAvatar(name)}
+                    alt={name || 'Student'}
+                    className="w-14 h-14 rounded-full object-cover ring-2 ring-blue-500/40 shadow-xs aspect-square"
+                  />
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setAvatar(getStudentAvatar(name))}
+                      className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Select Student Scholar Badge</span>
+                    </button>
+                    <span className="text-[11px] text-stone-400 block mt-1">
+                      Updates dynamically as you change your name
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ) : avatarMode === 'preset' ? (
               <div>
                 <div className="text-[11px] font-medium text-stone-500 mb-2">
                   Choose your student avatar:

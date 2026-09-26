@@ -44,8 +44,6 @@ export default function CreateMaterialModal({
   onAddMaterial,
   currentUser,
 }: CreateMaterialModalProps) {
-  if (!isOpen) return null;
-
   const [groupId, setGroupId] = useState(selectedGroupId || (groups[0]?.id ?? 'general'));
   const [title, setTitle] = useState('');
   const [subject, setSubject] = useState<Subject>('Financial Accounting');
@@ -167,6 +165,8 @@ export default function CreateMaterialModal({
     onClose();
   };
 
+  if (!isOpen) return null;
+
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-stone-950/70 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
       <div className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-stone-200 overflow-hidden flex flex-col max-h-[92vh] animate-in fade-in zoom-in-95 duration-200">
@@ -193,9 +193,16 @@ export default function CreateMaterialModal({
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-5">
           {/* Target Group */}
           <div>
-            <label className="block text-xs font-bold text-stone-700 uppercase tracking-wide mb-1.5">
-              Target Study Group
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-xs font-bold text-stone-700 uppercase tracking-wide">
+                Target Study Group
+              </label>
+              {groups.find((g) => g.id === groupId)?.privacy === 'private' && (
+                <span className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                  <span>🔒 Private Circle</span>
+                </span>
+              )}
+            </div>
             <select
               value={groupId}
               onChange={(e) => setGroupId(e.target.value)}
@@ -207,11 +214,16 @@ export default function CreateMaterialModal({
               ) : (
                 groups.map((g) => (
                   <option key={g.id} value={g.id}>
-                    {g.badgeEmoji} {g.name} ({g.subject})
+                    {g.privacy === 'private' ? '🔒 ' : '🌐 '}{g.badgeEmoji} {g.name} ({g.subject}){g.privacy === 'private' ? ' • Private Circle' : ''}
                   </option>
                 ))
               )}
             </select>
+            {groups.find((g) => g.id === groupId)?.privacy === 'private' && (
+              <p className="text-[11px] text-purple-700 mt-1">
+                🔒 This problem will be posted exclusively to this private circle. Only verified members with the secret code or invite link can view and solve it.
+              </p>
+            )}
           </div>
 
           {/* Title & Topic */}

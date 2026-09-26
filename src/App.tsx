@@ -12,7 +12,8 @@ import {
   CheckCircle2,
   X,
   RotateCcw,
-  Trash2
+  Trash2,
+  Key
 } from 'lucide-react';
 import { initialGroups, GUEST_USER } from './data/initialData';
 import { 
@@ -55,6 +56,9 @@ import TopSolutionsView from './components/TopSolutionsView';
 import TopSolversLeaderboard from './components/TopSolversLeaderboard';
 import AIChatbox from './components/AIChatbox';
 import SelectQuestionToSolveModal from './components/SelectQuestionToSolveModal';
+import JoinGroupModal from './components/JoinGroupModal';
+import InviteMembersModal from './components/InviteMembersModal';
+import { parseInviteParams } from './utils/groupCode';
 import { 
   auth, 
   signOutUser, 
@@ -166,6 +170,28 @@ export default function App() {
   const [isSelectQuestionToSolveOpen, setIsSelectQuestionToSolveOpen] = useState(false);
   const [isSyncingProfile, setIsSyncingProfile] = useState(false);
 
+  // Private Group Secret Code & Invitation Link states
+  const [isJoinGroupOpen, setIsJoinGroupOpen] = useState(false);
+  const [joinGroupInitialCode, setJoinGroupInitialCode] = useState('');
+  const [joinGroupInitialId, setJoinGroupInitialId] = useState('');
+  const [inviteGroup, setInviteGroup] = useState<StudyGroup | null>(null);
+
+  // Check URL for invitation link parameters (?joinGroup=...&code=...)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const inviteParams = parseInviteParams(window.location.search);
+    if (inviteParams.groupId || inviteParams.code || inviteParams.invite) {
+      if (inviteParams.code || inviteParams.invite) {
+        setJoinGroupInitialCode(inviteParams.code || inviteParams.invite || '');
+      }
+      if (inviteParams.groupId) {
+        setJoinGroupInitialId(inviteParams.groupId);
+      }
+      setIsJoinGroupOpen(true);
+      setActiveTab('groups');
+    }
+  }, []);
+
   // Auth state & Real-time profile sync across devices
   useEffect(() => {
     let unsubProfileDoc: (() => void) | null = null;
@@ -187,60 +213,99 @@ export default function App() {
       }
 
       const uid = firebaseUser.uid;
+      const userEmail = (firebaseUser.email || '').toLowerCase().trim();
       activeAuthUid = uid;
 
-      // 2. INSTANT LOGIN: Hydrate and set user state immediately (under 1 second)
-      const cachedUser = getStoredUser();
-      const hasCached = cachedUser && (cachedUser.id === uid || cachedUser.authUid === uid);
-      const studentName = (hasCached && cachedUser.name)
-        ? cachedUser.name
-        : (firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'Student Scholar'));
-      const studentAvatar = (hasCached && cachedUser.hasCustomAvatar && cachedUser.avatar)
-        ? cachedUser.avatar
-        : (firebaseUser.photoURL || getStudentAvatar(studentName));
+      // 2. Immediate Session Authentication:
+      // Always look up account-specific cached profile first (by UID or Email) so previously saved changes are never lost!
+      const cachedUser = getStoredUser(uid) || (userEmail ? getStoredUser(userEmail) : null) || getStoredUser();
+      const hasCached = Boolean(cachedUser && cachedUser.id !== 'guest' && cachedUser.name && cachedUser.name.trim().length > 0);
 
-      const immediateUser: UserProfile = {
+      const baseName = (hasCached && cachedUser.name)
+        ? cachedUser.name
+        : (firebaseUser.displayName || (userEmail ? userEmail.split('@')[0] : 'Student Scholar'));
+
+      // Preserve previously customized student avatar
+      const baseAvatar = (hasCached && cachedUser.avatar)
+        ? cachedUser.avatar
+        : getStudentAvatar(baseName);
+
+      const baseGrade = (hasCached && cachedUser.gradeLevel && cachedUser.gradeLevel.trim() !== 'Student Scholar')
+        ? cachedUser.gradeLevel.trim()
+        : 'Commerce Student (B.Com / CA Aspirant)';
+
+      const baseCourses = (hasCached && cachedUser.courses && cachedUser.courses.length > 0)
+        ? cachedUser.courses
+        : ['Financial Accounting', 'Corporate Law', 'Direct Taxation', 'Macroeconomics'];
+
+      const baseBio = hasCached ? (cachedUser.bio || '') : '';
+
+      const sessionUser: UserProfile = {
         ...GUEST_USER,
         ...(hasCached ? cachedUser : {}),
         id: uid,
         authUid: uid,
-        name: studentName,
-        email: firebaseUser.email || undefined,
-        avatar: studentAvatar,
-        hasCustomAvatar: Boolean(hasCached && cachedUser.hasCustomAvatar),
-        customAvatar: hasCached ? cachedUser.customAvatar : undefined,
+        name: baseName,
+        avatar: baseAvatar,
+        hasCustomAvatar: Boolean(hasCached && (cachedUser.hasCustomAvatar || (baseAvatar && !baseAvatar.includes('googleusercontent.com')))),
+        customAvatar: hasCached ? (cachedUser.customAvatar || baseAvatar) : undefined,
+        gradeLevel: baseGrade,
+        courses: baseCourses,
+        bio: baseBio,
+        email: firebaseUser.email || (hasCached ? cachedUser.email : undefined),
         isAnonymous: firebaseUser.isAnonymous,
       };
 
-      // Set user immediately so login is instant
-      setUser(immediateUser);
-      saveStoredUser(immediateUser);
+      // Instantly set authenticated state with previous profile
+      setUser(sessionUser);
+      saveStoredUser(sessionUser);
 
-      // 3. Fast cloud profile check & real-time sync (non-blocking)
+      // 3. Cloud profile retrieval from Firestore (never overwrite saved edits with defaults!)
       (async () => {
         try {
-          // Fast check with max 2s timeout so login never hangs
-          const cloudProfile = await Promise.race([
-            fetchUserProfileFromFirestore(uid),
-            new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000))
-          ]);
+          const cloudProfile = await fetchUserProfileFromFirestore(uid);
+          if (activeAuthUid !== uid) return;
 
-          if (cloudProfile && activeAuthUid === uid) {
-            setUser((prev) => {
-              const resolved: UserProfile = {
-                ...prev,
-                ...cloudProfile,
-                id: uid,
-                authUid: uid,
-                email: firebaseUser.email || cloudProfile.email || prev.email,
-                isAnonymous: firebaseUser.isAnonymous,
-              };
-              saveStoredUser(resolved);
-              return resolved;
-            });
-          } else if (!cloudProfile && !hasCached) {
-            // First time ever: initialize Firestore document in background
-            syncUserProfileToFirestore(immediateUser).catch(() => {});
+          if (cloudProfile && cloudProfile.name) {
+            // Cloud profile exists: merge it, prioritizing saved edits
+            const resolvedName = cloudProfile.name || sessionUser.name;
+            const resolvedAvatar = (cloudProfile.avatar && cloudProfile.avatar.trim())
+              ? cloudProfile.avatar
+              : sessionUser.avatar;
+
+            const resolvedGrade = (cloudProfile.gradeLevel && cloudProfile.gradeLevel.trim() !== 'Student Scholar')
+              ? cloudProfile.gradeLevel.trim()
+              : sessionUser.gradeLevel;
+
+            const resolvedCourses = (cloudProfile.courses && cloudProfile.courses.length > 0)
+              ? cloudProfile.courses
+              : sessionUser.courses;
+
+            const resolvedBio = cloudProfile.bio !== undefined
+              ? cloudProfile.bio
+              : sessionUser.bio;
+
+            const resolvedUser: UserProfile = {
+              ...sessionUser,
+              ...cloudProfile,
+              id: uid,
+              authUid: uid,
+              name: resolvedName,
+              avatar: resolvedAvatar,
+              hasCustomAvatar: Boolean(cloudProfile.hasCustomAvatar || sessionUser.hasCustomAvatar),
+              customAvatar: cloudProfile.customAvatar || sessionUser.customAvatar,
+              gradeLevel: resolvedGrade,
+              courses: resolvedCourses,
+              bio: resolvedBio,
+              email: firebaseUser.email || cloudProfile.email || sessionUser.email,
+              isAnonymous: firebaseUser.isAnonymous,
+            };
+
+            setUser(resolvedUser);
+            saveStoredUser(resolvedUser);
+          } else {
+            // No remote document yet or remote was empty: back up current session user (with any edits) to Firestore
+            await syncUserProfileToFirestore(sessionUser).catch(() => {});
           }
         } catch (err) {
           console.warn('Profile fetch notice:', err);
@@ -250,18 +315,28 @@ export default function App() {
           }
         }
 
-        // 4. Attach real-time listener for subsequent cross-device edits
+        // 4. Attach real-time Firestore listener for subsequent live cross-device sync
         if (activeAuthUid === uid && !unsubProfileDoc) {
           unsubProfileDoc = subscribeToUserProfile(
             uid,
             (liveProfile) => {
-              if (activeAuthUid !== uid || !liveProfile) return;
+              if (activeAuthUid !== uid || !liveProfile || !liveProfile.name) return;
               setUser((prev) => {
+                const liveAvatar = (liveProfile.avatar && liveProfile.avatar.trim())
+                  ? liveProfile.avatar
+                  : prev.avatar;
+
                 const merged: UserProfile = {
                   ...prev,
                   ...liveProfile,
                   id: uid,
                   authUid: uid,
+                  name: liveProfile.name || prev.name,
+                  avatar: liveAvatar,
+                  gradeLevel: liveProfile.gradeLevel || prev.gradeLevel,
+                  courses: (liveProfile.courses && liveProfile.courses.length > 0) ? liveProfile.courses : prev.courses,
+                  bio: liveProfile.bio !== undefined ? liveProfile.bio : prev.bio,
+                  email: firebaseUser.email || liveProfile.email || prev.email,
                 };
                 saveStoredUser(merged);
                 return merged;
@@ -359,6 +434,22 @@ export default function App() {
         // Group filter
         if (selectedGroupId && mat.groupId !== selectedGroupId) {
           return false;
+        }
+
+        // Private Group Protection: If material belongs to a private group, only members can view it
+        if (mat.groupId) {
+          const parentGroup = groups.find((g) => g.id === mat.groupId);
+          if (parentGroup && parentGroup.privacy === 'private') {
+            const currentUid = user.authUid || user.id;
+            const isMember = 
+              parentGroup.isJoined || 
+              user.joinedGroupIds.includes(parentGroup.id) ||
+              parentGroup.createdByUid === currentUid ||
+              parentGroup.memberUids?.includes(currentUid);
+            if (!isMember) {
+              return false;
+            }
+          }
         }
         // Subject filter
         if (selectedSubject !== 'All' && mat.subject !== selectedSubject) {
@@ -647,27 +738,116 @@ export default function App() {
 
   // Handler: Join/Leave group
   const handleToggleJoinGroup = (groupId: string) => {
+    const targetGroup = groups.find((g) => g.id === groupId);
+    if (!targetGroup) return;
+
+    const currentUid = user.authUid || user.id;
+    const isMember = 
+      targetGroup.isJoined || 
+      user.joinedGroupIds.includes(groupId) ||
+      targetGroup.createdByUid === currentUid ||
+      targetGroup.memberUids?.includes(currentUid);
+
+    // If private and not joined yet, open Join with Code modal!
+    if (targetGroup.privacy === 'private' && !isMember) {
+      setJoinGroupInitialId(targetGroup.id);
+      setJoinGroupInitialCode(targetGroup.secretCode || '');
+      setIsJoinGroupOpen(true);
+      return;
+    }
+
     setGroups((prev) =>
       prev.map((g) => {
         if (g.id !== groupId) return g;
-        const nowJoined = !g.isJoined;
+        const nowJoined = !isMember;
+        const updatedMemberUids = nowJoined
+          ? Array.from(new Set([...(g.memberUids || []), currentUid]))
+          : (g.memberUids || []).filter((uid) => uid !== currentUid);
+
         const updated: StudyGroup = {
           ...g,
           isJoined: nowJoined,
           memberCount: nowJoined ? g.memberCount + 1 : Math.max(1, g.memberCount - 1),
+          memberUids: updatedMemberUids,
         };
         addGroupToFirestore(updated).catch(() => {});
         return updated;
       })
     );
+
+    setUser((prev) => {
+      const nowJoined = !isMember;
+      const updatedUser: UserProfile = {
+        ...prev,
+        joinedGroupIds: nowJoined
+          ? Array.from(new Set([...prev.joinedGroupIds, groupId]))
+          : prev.joinedGroupIds.filter((id) => id !== groupId),
+      };
+      saveStoredUser(updatedUser);
+      syncUserProfileToFirestore(updatedUser).catch(() => {});
+      return updatedUser;
+    });
+  };
+
+  // Handler: Join group (specifically from JoinGroupModal with secret code or invite link)
+  const handleJoinGroup = (targetGroup: StudyGroup) => {
+    const currentUid = user.authUid || user.id;
+    const updatedMemberUids = Array.from(new Set([...(targetGroup.memberUids || []), currentUid]));
+
+    const updatedGroup: StudyGroup = {
+      ...targetGroup,
+      isJoined: true,
+      memberCount: targetGroup.isJoined ? targetGroup.memberCount : targetGroup.memberCount + 1,
+      memberUids: updatedMemberUids,
+    };
+
+    setGroups((prev) =>
+      prev.map((g) => (g.id === targetGroup.id ? updatedGroup : g))
+    );
+
+    const updatedUser: UserProfile = {
+      ...user,
+      joinedGroupIds: Array.from(new Set([...user.joinedGroupIds, targetGroup.id])),
+    };
+    setUser(updatedUser);
+    saveStoredUser(updatedUser);
+
+    addGroupToFirestore(updatedGroup).catch(() => {});
+    syncUserProfileToFirestore(updatedUser).catch(() => {});
+    setSelectedGroupId(targetGroup.id);
+  };
+
+  // Handler: Update group (e.g. regenerate secret code from Invite modal)
+  const handleUpdateGroup = (updatedGroup: StudyGroup) => {
+    setGroups((prev) =>
+      prev.map((g) => (g.id === updatedGroup.id ? updatedGroup : g))
+    );
+    if (inviteGroup && inviteGroup.id === updatedGroup.id) {
+      setInviteGroup(updatedGroup);
+    }
+    addGroupToFirestore(updatedGroup).catch(() => {});
   };
 
   // Handler: Add new group
   const handleAddGroup = (newGroup: StudyGroup) => {
     setGroups((prev) => [newGroup, ...prev.filter((g) => g.id !== newGroup.id)]);
+    setUser((prev) => {
+      const updatedUser: UserProfile = {
+        ...prev,
+        joinedGroupIds: Array.from(new Set([...prev.joinedGroupIds, newGroup.id])),
+      };
+      saveStoredUser(updatedUser);
+      syncUserProfileToFirestore(updatedUser).catch(() => {});
+      return updatedUser;
+    });
     addGroupToFirestore(newGroup).catch((err) => {
       console.warn('Could not save group to Firestore:', err);
     });
+
+    // If it's a private group, immediately open invite modal so creator can share code/link!
+    if (newGroup.privacy === 'private') {
+      setInviteGroup(newGroup);
+    }
   };
 
   // Handler: Delete study group
@@ -696,16 +876,15 @@ export default function App() {
     setUser(updatedUser);
     saveStoredUser(updatedUser);
 
-    // 2. Immediate persist to Cloud Firestore with safety timeout so UI never hangs in "syncing"
+    // 2. Persist to Cloud Firestore immediately with auto-resetting status indicator
     setIsSyncingProfile(true);
+    const syncTimer = setTimeout(() => setIsSyncingProfile(false), 1200);
     try {
-      await Promise.race([
-        syncUserProfileToFirestore(updatedUser),
-        new Promise((resolve) => setTimeout(resolve, 1500))
-      ]);
+      await syncUserProfileToFirestore(updatedUser);
     } catch (err) {
       console.warn('Could not save profile to Cloud Firestore:', err);
     } finally {
+      clearTimeout(syncTimer);
       setIsSyncingProfile(false);
     }
   };
@@ -762,6 +941,11 @@ export default function App() {
                   <span className="text-xs px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 font-semibold border border-blue-100 dark:border-blue-900">
                     {selectedGroup.subject}
                   </span>
+                  {selectedGroup.privacy === 'private' && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md border bg-purple-50 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800">
+                      🔒 Private
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-stone-500 dark:text-stone-400 mt-0.5 max-w-xl">
                   {selectedGroup.description}
@@ -770,6 +954,16 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+              {selectedGroup.privacy === 'private' && (
+                <button
+                  onClick={() => setInviteGroup(selectedGroup)}
+                  className="px-3 py-1.5 rounded-xl border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/50 hover:bg-purple-100 text-purple-800 dark:text-purple-300 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="Share secret code or direct invite link"
+                >
+                  <Key className="w-3.5 h-3.5" />
+                  <span>Invite Link / Code</span>
+                </button>
+              )}
               <button
                 onClick={() => setIsCreateMaterialOpen(true)}
                 className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
@@ -914,6 +1108,14 @@ export default function App() {
             onOpenCreateGroupModal={() => setIsCreateGroupOpen(true)}
             onDeleteGroup={handleDeleteGroup}
             onRestoreDefaultGroups={handleRestoreDefaultGroups}
+            currentUser={user}
+            onOpenAuthModal={() => setIsAuthModalOpen(true)}
+            onOpenJoinCodeModal={(targetId, code) => {
+              setJoinGroupInitialId(targetId || '');
+              setJoinGroupInitialCode(code || '');
+              setIsJoinGroupOpen(true);
+            }}
+            onOpenInviteModal={(group) => setInviteGroup(group)}
           />
         )}
 
@@ -975,53 +1177,92 @@ export default function App() {
       )}
 
       {/* MODAL 4: Share New Study Material */}
-      <CreateMaterialModal
-        isOpen={isCreateMaterialOpen}
-        onClose={() => setIsCreateMaterialOpen(false)}
-        groups={groups}
-        selectedGroupId={selectedGroupId}
-        onAddMaterial={handleAddMaterial}
-        currentUser={user}
-      />
+      {isCreateMaterialOpen && (
+        <CreateMaterialModal
+          isOpen={isCreateMaterialOpen}
+          onClose={() => setIsCreateMaterialOpen(false)}
+          groups={groups}
+          selectedGroupId={selectedGroupId}
+          onAddMaterial={handleAddMaterial}
+          currentUser={user}
+        />
+      )}
 
       {/* MODAL 5: Create Study Group */}
-      <CreateGroupModal
-        isOpen={isCreateGroupOpen}
-        onClose={() => setIsCreateGroupOpen(false)}
-        onAddGroup={handleAddGroup}
-        currentUser={user}
-      />
+      {isCreateGroupOpen && (
+        <CreateGroupModal
+          isOpen={isCreateGroupOpen}
+          onClose={() => setIsCreateGroupOpen(false)}
+          onAddGroup={handleAddGroup}
+          currentUser={user}
+        />
+      )}
 
       {/* MODAL 6: Edit Student Profile & Avatar */}
-      <EditProfileModal
-        isOpen={isEditProfileOpen}
-        onClose={() => setIsEditProfileOpen(false)}
-        currentUser={user}
-        onUpdateUser={handleSaveProfile}
-      />
+      {isEditProfileOpen && (
+        <EditProfileModal
+          isOpen={isEditProfileOpen}
+          onClose={() => setIsEditProfileOpen(false)}
+          currentUser={user}
+          onUpdateUser={handleSaveProfile}
+        />
+      )}
 
       {/* MODAL 7: Student Authentication & ID Switcher */}
-      <AuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-        currentUser={user}
-        onAuthSuccess={(updatedUser) => {
-          setUser(updatedUser);
-          setIsAuthModalOpen(false);
-        }}
-      />
+      {isAuthModalOpen && (
+        <AuthModal
+          isOpen={isAuthModalOpen}
+          onClose={() => setIsAuthModalOpen(false)}
+          currentUser={user}
+          onAuthSuccess={(updatedUser) => {
+            setUser(updatedUser);
+            setIsAuthModalOpen(false);
+          }}
+        />
+      )}
 
       {/* MODAL 8: Select Question To Solve (Step 2 in Beginner Guide) */}
-      <SelectQuestionToSolveModal
-        isOpen={isSelectQuestionToSolveOpen}
-        onClose={() => setIsSelectQuestionToSolveOpen(false)}
-        materials={materials}
-        solutions={solutions}
-        onSelectMaterialToSolve={(mat) => {
-          setIsSelectQuestionToSolveOpen(false);
-          setPostSolutionMaterial(mat);
-        }}
-      />
+      {isSelectQuestionToSolveOpen && (
+        <SelectQuestionToSolveModal
+          isOpen={isSelectQuestionToSolveOpen}
+          onClose={() => setIsSelectQuestionToSolveOpen(false)}
+          materials={materials}
+          solutions={solutions}
+          onSelectMaterialToSolve={(mat) => {
+            setIsSelectQuestionToSolveOpen(false);
+            setPostSolutionMaterial(mat);
+          }}
+        />
+      )}
+
+      {/* MODAL 9: Join Private Group via Secret Code or Invite Link */}
+      {isJoinGroupOpen && (
+        <JoinGroupModal
+          isOpen={isJoinGroupOpen}
+          onClose={() => {
+            setIsJoinGroupOpen(false);
+            setJoinGroupInitialCode('');
+            setJoinGroupInitialId('');
+          }}
+          groups={groups}
+          onJoinGroup={handleJoinGroup}
+          currentUser={user}
+          initialCode={joinGroupInitialCode}
+          initialGroupId={joinGroupInitialId}
+          onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        />
+      )}
+
+      {/* MODAL 10: Invite Members & Share Secret Code / Invite Link */}
+      {inviteGroup && (
+        <InviteMembersModal
+          isOpen={Boolean(inviteGroup)}
+          onClose={() => setInviteGroup(null)}
+          group={inviteGroup}
+          currentUser={user}
+          onUpdateGroup={handleUpdateGroup}
+        />
+      )}
 
       {/* Floating AI Assistant Chatbox (Text + Image Question Solving) */}
       <AIChatbox />

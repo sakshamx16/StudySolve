@@ -62,8 +62,6 @@ export default function SolutionViewerModal({
   onVoteHelpful,
   currentUser,
 }: SolutionViewerModalProps) {
-  if (!solution) return null;
-
   // Active view tab inside modal
   const [activeTab, setActiveTab] = useState<'media' | 'steps' | 'reviews'>('media');
 
@@ -90,9 +88,9 @@ export default function SolutionViewerModal({
   const [hoverRating, setHoverRating] = useState<number | null>(null);
 
   // Format Badge
-  const isPdf = solution.solutionType === 'pdf';
-  const isImage = solution.solutionType === 'image';
-  const isVideo = solution.solutionType === 'video';
+  const isPdf = solution?.solutionType === 'pdf';
+  const isImage = solution?.solutionType === 'image';
+  const isVideo = solution?.solutionType === 'video';
 
   // Toggle feedback tag
   const toggleTag = (tag: string) => {
@@ -113,7 +111,7 @@ export default function SolutionViewerModal({
   // Handle Review Submission
   const handleSubmitReview = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!reviewComment.trim()) return;
+    if (!reviewComment.trim() || !solution) return;
 
     onAddReview(
       solution.id,
@@ -140,6 +138,8 @@ export default function SolutionViewerModal({
       // ignore
     }
   };
+
+  if (!solution) return null;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-stone-950/70 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">

@@ -15,6 +15,8 @@ export type DifficultyLevel = 'Beginner' | 'Intermediate' | 'Advanced';
 
 export type SolutionMediaType = 'pdf' | 'image' | 'video';
 
+export type GroupPrivacy = 'public' | 'private';
+
 export interface StudyGroup {
   id: string;
   name: string;
@@ -29,6 +31,10 @@ export interface StudyGroup {
   leaderName: string;
   createdByUid?: string;
   createdAt: string;
+  privacy?: GroupPrivacy;
+  secretCode?: string;
+  inviteToken?: string;
+  memberUids?: string[];
 }
 
 export interface MaterialAttachment {

@@ -11,7 +11,10 @@ import {
   CheckCircle2, 
   AlertCircle,
   HelpCircle,
-  Award
+  Award,
+  ExternalLink,
+  Copy,
+  Check
 } from 'lucide-react';
 import { 
   signInWithGoogle, 
@@ -23,6 +26,7 @@ import {
 } from '../firebase';
 import { UserProfile } from '../types';
 import { getStudentAvatar } from '../utils/avatar';
+import { getStoredUser } from '../utils/storage';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -44,26 +48,57 @@ export default function AuthModal({
   const [gradeLevel, setGradeLevel] = useState(currentUser.gradeLevel || 'Commerce Student');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [unauthorizedDomain, setUnauthorizedDomain] = useState(false);
+  const [copiedDomains, setCopiedDomains] = useState(false);
+  const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'studysolve.site';
+  const isPreviewHost = currentHost && !['localhost', '127.0.0.1', 'studysolve.site', 'www.studysolve.site'].includes(currentHost);
+  const domainsToCopy = isPreviewHost
+    ? `${currentHost}\nstudysolve.site\nwww.studysolve.site`
+    : 'studysolve.site\nwww.studysolve.site';
 
   if (!isOpen) return null;
 
   const handleGoogleSignIn = async () => {
     setLoading(true);
     setError(null);
+    setUnauthorizedDomain(false);
     try {
-      await signInWithGoogle();
+      const fbUser = await signInWithGoogle();
+      const cached = getStoredUser(fbUser.uid) || (fbUser.email ? getStoredUser(fbUser.email) : null);
+      if (cached && cached.name && cached.id !== 'guest') {
+        onAuthSuccess(cached);
+      }
       onClose();
     } catch (err: any) {
-      console.error('Google sign-in error:', err);
-      if (err.code === 'auth/unauthorized-domain') {
-        setError('This domain is not yet authorized in Firebase Authentication. Please ensure "studysolve.site" and "www.studysolve.site" are added under Firebase Console → Authentication → Settings → Authorized domains.');
-      } else if (err.code === 'auth/popup-blocked') {
+      if (err?.code === 'auth/unauthorized-domain') {
+        console.warn('Google sign-in domain authorization required for:', typeof window !== 'undefined' ? window.location.hostname : 'current domain');
+        setUnauthorizedDomain(true);
+        setError(null);
+      } else if (err?.code === 'auth/popup-blocked') {
         setError('Sign-in popup was blocked by browser. Please allow popups for studysolve.site, or use Email & Password.');
-      } else if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
-        setError('Sign-in popup was closed before completion. You can try again whenever ready.');
+      } else if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
+        // User closed the popup, not an error
       } else {
+        console.error('Google sign-in error:', err);
         setError(err.message || 'Failed to sign in with Google. You can use Email/Password.');
       }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleInstantDemoLogin = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const fbUser = await loginAsGuest('Saksham');
+      const cached = getStoredUser(fbUser.uid);
+      if (cached && cached.name && cached.id !== 'guest') {
+        onAuthSuccess(cached);
+      }
+      onClose();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to initialize session.');
     } finally {
       setLoading(false);
     }
@@ -76,7 +111,11 @@ export default function AuthModal({
 
     try {
       if (tab === 'signin') {
-        await loginWithEmail(email.trim(), password);
+        const fbUser = await loginWithEmail(email.trim(), password);
+        const cached = getStoredUser(fbUser.uid) || getStoredUser(email.trim());
+        if (cached && cached.name && cached.id !== 'guest') {
+          onAuthSuccess(cached);
+        }
         onClose();
       } else if (tab === 'signup') {
         if (!displayName.trim()) {
@@ -92,7 +131,7 @@ export default function AuthModal({
         const fbUser = await registerWithEmail(email.trim(), password, displayName.trim());
         const initialAvatar = currentUser.hasCustomAvatar && currentUser.avatar
           ? currentUser.avatar
-          : getStudentAvatar(displayName.trim(), fbUser.photoURL || undefined);
+          : getStudentAvatar(displayName.trim());
 
         const updatedProfile: UserProfile = {
           ...currentUser,
@@ -189,7 +228,7 @@ export default function AuthModal({
           <div className="flex bg-black/25 backdrop-blur-md p-1 rounded-2xl mt-4 text-xs font-semibold border border-white/20 shadow-[inset_0_1px_2px_rgba(0,0,0,0.3)]">
             <button
               type="button"
-              onClick={() => { setTab('signin'); setError(null); }}
+              onClick={() => { setTab('signin'); setError(null); setUnauthorizedDomain(false); }}
               className={`flex-1 py-1.5 rounded-xl transition-all ${
                 tab === 'signin' 
                   ? 'bg-white/95 text-blue-900 shadow-[0_2px_8px_rgba(0,0,0,0.15),inset_0_1px_0_rgba(255,255,255,0.9)]' 
@@ -200,7 +239,7 @@ export default function AuthModal({
             </button>
             <button
               type="button"
-              onClick={() => { setTab('signup'); setError(null); }}
+              onClick={() => { setTab('signup'); setError(null); setUnauthorizedDomain(false); }}
               className={`flex-1 py-1.5 rounded-xl transition-all ${
                 tab === 'signup' 
                   ? 'bg-white/95 text-blue-900 shadow-[0_2px_8px_rgba(0,0,0,0.15),inset_0_1px_0_rgba(255,255,255,0.9)]' 
@@ -211,7 +250,7 @@ export default function AuthModal({
             </button>
             <button
               type="button"
-              onClick={() => { setTab('guest'); setError(null); }}
+              onClick={() => { setTab('guest'); setError(null); setUnauthorizedDomain(false); }}
               className={`flex-1 py-1.5 rounded-xl transition-all ${
                 tab === 'guest' 
                   ? 'bg-white/95 text-blue-900 shadow-[0_2px_8px_rgba(0,0,0,0.15),inset_0_1px_0_rgba(255,255,255,0.9)]' 
@@ -225,6 +264,100 @@ export default function AuthModal({
 
         {/* Liquid Glass Form Body */}
         <div className="p-6 overflow-y-auto space-y-4 relative z-10">
+          {unauthorizedDomain && (
+            <div className="p-4 bg-amber-50/90 dark:bg-amber-950/40 backdrop-blur-md border border-amber-300 dark:border-amber-700/60 rounded-2xl space-y-3 text-xs text-amber-950 dark:text-amber-100 animate-in fade-in shadow-xs">
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <div className="font-bold text-sm text-amber-900 dark:text-amber-200">
+                    {isPreviewHost ? 'Preview Environment Domain Notice' : 'Domain Authorization Syncing'}
+                  </div>
+                  <p className="text-amber-800/90 dark:text-amber-300/90 text-[11px] leading-relaxed">
+                    {isPreviewHost ? (
+                      <>
+                        Your live domain <strong>studysolve.site</strong> is configured for your users! However, you are currently testing inside the Google AI Studio preview window (<span className="font-mono text-[10px] bg-amber-200/70 dark:bg-amber-900/60 px-1 py-0.5 rounded font-semibold">{currentHost}</span>). Google OAuth popups check the active URL in the browser bar.
+                      </>
+                    ) : (
+                      <>
+                        If you recently added <strong>studysolve.site</strong> in the Firebase Console, Google's global authentication edge servers can take 2–5 minutes to finish propagating.
+                      </>
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-2.5 bg-white/80 dark:bg-stone-900/80 rounded-xl border border-amber-200 dark:border-amber-800/50 space-y-2">
+                <div className="text-[11px] font-semibold text-stone-700 dark:text-stone-300 flex items-center justify-between">
+                  <span>Domains to add in Firebase Console:</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(domainsToCopy);
+                      setCopiedDomains(true);
+                      setTimeout(() => setCopiedDomains(false), 2000);
+                    }}
+                    className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 font-medium cursor-pointer"
+                  >
+                    {copiedDomains ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                    <span>{copiedDomains ? 'Copied all!' : 'Copy domains'}</span>
+                  </button>
+                </div>
+                <div className="font-mono text-[11px] text-stone-800 dark:text-stone-200 bg-stone-100/80 dark:bg-stone-800/80 px-2.5 py-2 rounded-lg flex flex-col gap-1">
+                  {isPreviewHost && (
+                    <div className="flex items-center justify-between text-blue-700 dark:text-blue-300 font-bold">
+                      <span className="truncate max-w-[200px]">{currentHost}</span>
+                      <span className="text-[10px] text-blue-600 dark:text-blue-400 font-sans font-normal shrink-0">Current preview</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between">
+                    <span>studysolve.site</span>
+                    <span className="text-[10px] text-stone-400 font-sans">Root domain</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>www.studysolve.site</span>
+                    <span className="text-[10px] text-stone-400 font-sans">WWW subdomain</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                <a
+                  href="https://console.firebase.google.com/project/studysolve-bdec1/authentication/settings"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 py-2 px-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold text-center text-xs flex items-center justify-center gap-1.5 shadow-xs transition-colors"
+                >
+                  <span>Open Firebase Console Settings</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+                <button
+                  type="button"
+                  onClick={handleInstantDemoLogin}
+                  className="py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-center text-xs flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Instant Test Login (Bypass)</span>
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between pt-1">
+                <p className="text-[10px] text-amber-800/80 dark:text-amber-300/80">
+                  Firebase Console &rarr; <strong>Settings</strong> &rarr; <strong>Authorized domains</strong> &rarr; <strong>Add domain</strong>
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUnauthorizedDomain(false);
+                    setTab('signin');
+                  }}
+                  className="text-[10px] text-stone-600 dark:text-stone-400 hover:underline font-semibold"
+                >
+                  Use Student Email Instead &rarr;
+                </button>
+              </div>
+            </div>
+          )}
+
           {error && (
             <div className="p-3 bg-rose-50/80 dark:bg-rose-950/40 backdrop-blur-md border border-rose-200/80 dark:border-rose-800/60 rounded-2xl flex items-start gap-2.5 text-xs text-rose-800 dark:text-rose-200 animate-in fade-in shadow-2xs">
               <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
