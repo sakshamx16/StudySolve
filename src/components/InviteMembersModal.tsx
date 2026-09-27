@@ -129,7 +129,7 @@ export default function InviteMembersModal({
                 {group.badgeEmoji || '📚'}
               </div>
               <div>
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
                     {group.subject}
                   </span>
@@ -139,6 +139,10 @@ export default function InviteMembersModal({
                       : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                   }`}>
                     {isPrivate ? '🔒 Private Circle' : '🌐 Public Group'}
+                  </span>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-stone-700 bg-stone-100 border border-stone-200 px-2 py-0.5 rounded flex items-center gap-1">
+                    <Users className="w-2.5 h-2.5 text-stone-500" />
+                    <span>{group.memberCount} {group.memberCount === 1 ? 'Member' : 'Members'}</span>
                   </span>
                 </div>
                 <h3 className="font-bold text-sm text-stone-900 mt-1">

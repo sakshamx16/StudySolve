@@ -248,16 +248,24 @@ export default function StudyGroupsList({
                         {group.badgeEmoji}
                       </div>
                       <div>
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="text-[10px] font-semibold uppercase tracking-wider text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 px-2 py-0.5 rounded">
                             {group.subject}
                           </span>
-                          {isPrivate && (
+                          {isPrivate ? (
                             <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/60 border border-purple-200 dark:border-purple-800 px-2 py-0.5 rounded flex items-center gap-1">
                               <Lock className="w-2.5 h-2.5" />
                               <span>Private</span>
                             </span>
+                          ) : (
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 px-2 py-0.5 rounded flex items-center gap-1">
+                              <span>Public</span>
+                            </span>
                           )}
+                          <span className="text-[10px] font-bold text-stone-700 dark:text-stone-300 bg-stone-100 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 px-2 py-0.5 rounded flex items-center gap-1">
+                            <Users className="w-2.5 h-2.5 text-stone-500 dark:text-stone-400" />
+                            <span>{group.memberCount} {group.memberCount === 1 ? 'Member' : 'Members'}</span>
+                          </span>
                           {isCreator && (
                             <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 px-2 py-0.5 rounded flex items-center gap-1">
                               <Crown className="w-2.5 h-2.5 text-amber-500" />
