@@ -83,11 +83,18 @@ app.post("/api/groups", (req, res) => {
   }
 });
 
-// DELETE /api/groups/:id - Delete a study group
+// DELETE /api/groups/:id - Delete a study group (creator-only)
 app.delete("/api/groups/:id", (req, res) => {
   try {
     const { id } = req.params;
+    const requesterUid = (req.headers["x-user-id"] as string) || (req.query.userId as string) || req.body?.userId;
     let groups = readJsonFile<any[]>(GROUPS_FILE, []);
+    const targetGroup = groups.find((g) => g.id === id);
+    if (targetGroup && targetGroup.createdByUid) {
+      if (requesterUid && requesterUid !== targetGroup.createdByUid) {
+        return res.status(403).json({ error: "Only the creator of this group can delete it" });
+      }
+    }
     groups = groups.filter((g) => g.id !== id);
     writeJsonFile(GROUPS_FILE, groups);
     res.json({ success: true });

@@ -13,7 +13,8 @@ import {
   X,
   RotateCcw,
   Trash2,
-  Key
+  Key,
+  LogOut
 } from 'lucide-react';
 import { initialGroups, GUEST_USER } from './data/initialData';
 import { 
@@ -946,8 +947,23 @@ export default function App() {
     }
   };
 
-  // Handler: Delete study group
+  // Handler: Delete study group (Only the person who created the group can delete it)
   const handleDeleteGroup = (groupId: string) => {
+    const targetGroup = groups.find((g) => g.id === groupId);
+    const currentUid = user.authUid || user.id;
+    const isCreator = Boolean(
+      targetGroup &&
+      currentUid &&
+      currentUid !== 'guest' &&
+      targetGroup.createdByUid &&
+      (targetGroup.createdByUid === currentUid || (user.authUid && targetGroup.createdByUid === user.authUid))
+    );
+
+    // If group has a creator and current user is not that creator, do not allow delete
+    if (targetGroup && targetGroup.createdByUid && !isCreator) {
+      return;
+    }
+
     setGroups((prev) => prev.filter((g) => g.id !== groupId));
     if (selectedGroupId === groupId) {
       setSelectedGroupId(null);
@@ -960,7 +976,7 @@ export default function App() {
       saveStoredUser(updatedUser);
       return updatedUser;
     });
-    deleteSharedGroupFromApi(groupId).catch(() => {});
+    deleteSharedGroupFromApi(groupId, currentUid).catch(() => {});
     deleteGroupFromFirestore(groupId).catch((err) => {
       console.info('Firestore group delete notice:', err);
     });
@@ -1054,44 +1070,82 @@ export default function App() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
-              {selectedGroup.privacy === 'private' && (
-                <button
-                  onClick={() => setInviteGroup(selectedGroup)}
-                  className="px-3 py-1.5 rounded-xl border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/50 hover:bg-purple-100 text-purple-800 dark:text-purple-300 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-                  title="Share secret code or direct invite link"
-                >
-                  <Key className="w-3.5 h-3.5" />
-                  <span>Invite Link / Code</span>
-                </button>
-              )}
-              <button
-                onClick={() => setIsCreateMaterialOpen(true)}
-                className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Post Problem to Group</span>
-              </button>
-              <button
-                onClick={() => setSelectedGroupId(null)}
-                className="px-3 py-1.5 rounded-xl border border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800 text-xs font-medium transition-colors cursor-pointer"
-              >
-                View All Groups
-              </button>
-              <button
-                onClick={() => {
-                  if (window.confirm(`Are you sure you want to delete "${selectedGroup.name}"?`)) {
-                    handleDeleteGroup(selectedGroup.id);
-                  }
-                }}
-                className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border border-stone-200 dark:border-stone-700 text-stone-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer"
-                title="Delete this group"
-                aria-label="Delete this group"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Delete</span>
-              </button>
-            </div>
+            {(() => {
+              const currentUid = user.authUid || user.id;
+              const isSelectedGroupCreator = Boolean(
+                currentUid &&
+                currentUid !== 'guest' &&
+                selectedGroup.createdByUid &&
+                (selectedGroup.createdByUid === currentUid || (user.authUid && selectedGroup.createdByUid === user.authUid))
+              );
+              const isSelectedGroupMember = 
+                isSelectedGroupCreator ||
+                user.joinedGroupIds.includes(selectedGroup.id) ||
+                Boolean(currentUid && currentUid !== 'guest' && selectedGroup.memberUids?.includes(currentUid));
+
+              return (
+                <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+                  {selectedGroup.privacy === 'private' && (
+                    <button
+                      onClick={() => setInviteGroup(selectedGroup)}
+                      className="px-3 py-1.5 rounded-xl border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/50 hover:bg-purple-100 text-purple-800 dark:text-purple-300 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                      title="Share secret code or direct invite link"
+                    >
+                      <Key className="w-3.5 h-3.5" />
+                      <span>Invite Link / Code</span>
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setIsCreateMaterialOpen(true)}
+                    className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Post Problem to Group</span>
+                  </button>
+                  <button
+                    onClick={() => setSelectedGroupId(null)}
+                    className="px-3 py-1.5 rounded-xl border border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800 text-xs font-medium transition-colors cursor-pointer"
+                  >
+                    View All Groups
+                  </button>
+
+                  {/* ONLY the person who created the group can delete that group */}
+                  {isSelectedGroupCreator && (
+                    <button
+                      onClick={() => {
+                        if (window.confirm(`Are you sure you want to delete "${selectedGroup.name}"? As the creator, this will permanently remove it for all members.`)) {
+                          handleDeleteGroup(selectedGroup.id);
+                        }
+                      }}
+                      className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border border-stone-200 dark:border-stone-700 text-stone-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer"
+                      title="Delete this group (Creator only)"
+                      aria-label="Delete this group"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Delete</span>
+                    </button>
+                  )}
+
+                  {/* Others who have joined have an option to leave that group */}
+                  {!isSelectedGroupCreator && isSelectedGroupMember && (
+                    <button
+                      onClick={() => {
+                        if (window.confirm(`Are you sure you want to leave "${selectedGroup.name}"? You can rejoin anytime.`)) {
+                          handleToggleJoinGroup(selectedGroup.id);
+                          setSelectedGroupId(null);
+                        }
+                      }}
+                      className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30 text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer"
+                      title="Leave this group"
+                      aria-label="Leave this group"
+                    >
+                      <LogOut className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                      <span className="hidden sm:inline">Leave Group</span>
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
 

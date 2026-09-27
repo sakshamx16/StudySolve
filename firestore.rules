@@ -16,8 +16,14 @@ service cloud.firestore {
     // Study groups (open and collaborative for peer learning)
     match /study_groups/{groupId} {
       allow read: if true;
-      allow create, update: if true;
-      allow delete: if true;
+      allow create: if true;
+      allow update: if true;
+      // Only the person who created the group can delete that group
+      allow delete: if (
+        resource.data.createdByUid == null ||
+        resource.data.createdByUid == '' ||
+        (request.auth != null && request.auth.uid == resource.data.createdByUid)
+      );
     }
 
     // Questions and study materials

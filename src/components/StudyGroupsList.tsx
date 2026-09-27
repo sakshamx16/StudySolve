@@ -9,7 +9,9 @@ import {
   Trash2,
   Lock,
   Key,
-  LogIn
+  LogIn,
+  LogOut,
+  Crown
 } from 'lucide-react';
 import { StudyGroup, Subject, UserProfile } from '../types';
 
@@ -52,6 +54,7 @@ export default function StudyGroupsList({
 }: StudyGroupsListProps) {
   const [selectedSubject, setSelectedSubject] = useState<Subject | 'All'>('All');
   const [groupToDelete, setGroupToDelete] = useState<StudyGroup | null>(null);
+  const [groupToLeave, setGroupToLeave] = useState<StudyGroup | null>(null);
 
   const isLoggedIn = Boolean(
     currentUser.name && 
@@ -66,11 +69,21 @@ export default function StudyGroupsList({
     ])
   );
 
+  const isGroupCreator = (group: StudyGroup): boolean => {
+    const currentUid = currentUser.authUid || currentUser.id;
+    if (!currentUid || currentUid === 'guest') return false;
+    if (!group.createdByUid) return false;
+    return (
+      group.createdByUid === currentUid ||
+      Boolean(currentUser.authUid && group.createdByUid === currentUser.authUid)
+    );
+  };
+
   const isUserMember = (group: StudyGroup): boolean => {
     const currentUid = currentUser.authUid || currentUser.id;
+    if (isGroupCreator(group)) return true;
     if (currentUser.joinedGroupIds?.includes(group.id)) return true;
     if (currentUid && currentUid !== 'guest') {
-      if (group.createdByUid === currentUid) return true;
       if (group.memberUids?.includes(currentUid)) return true;
     }
     return false;
@@ -220,6 +233,7 @@ export default function StudyGroupsList({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredGroups.map((group) => {
             const isPrivate = group.privacy === 'private';
+            const isCreator = isGroupCreator(group);
             const isMember = isUserMember(group);
 
             return (
@@ -244,6 +258,12 @@ export default function StudyGroupsList({
                               <span>Private</span>
                             </span>
                           )}
+                          {isCreator && (
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 px-2 py-0.5 rounded flex items-center gap-1">
+                              <Crown className="w-2.5 h-2.5 text-amber-500" />
+                              <span>Creator</span>
+                            </span>
+                          )}
                         </div>
                         <h3 className="font-bold text-base text-stone-900 dark:text-stone-100 mt-1 leading-snug">
                           {group.name}
@@ -265,17 +285,35 @@ export default function StudyGroupsList({
                         </button>
                       )}
 
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setGroupToDelete(group);
-                        }}
-                        title="Delete group"
-                        aria-label={`Delete ${group.name}`}
-                        className="p-1.5 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition-colors shrink-0 opacity-80 hover:opacity-100 cursor-pointer"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {/* ONLY the person who created the group can delete that group */}
+                      {isCreator && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setGroupToDelete(group);
+                          }}
+                          title="Delete your group"
+                          aria-label={`Delete ${group.name}`}
+                          className="p-1.5 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition-colors shrink-0 opacity-80 hover:opacity-100 cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+
+                      {/* Others who have joined have an option to leave that group */}
+                      {!isCreator && isMember && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setGroupToLeave(group);
+                          }}
+                          title="Leave this study group"
+                          aria-label={`Leave ${group.name}`}
+                          className="p-1.5 rounded-lg text-stone-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/50 transition-colors shrink-0 opacity-80 hover:opacity-100 cursor-pointer"
+                        >
+                          <LogOut className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -303,23 +341,30 @@ export default function StudyGroupsList({
                 </div>
 
                 <div className="pt-3 border-t border-stone-100 dark:border-stone-800 flex items-center justify-between gap-2 mt-2">
-                  <button
-                    onClick={() => onToggleJoinGroup(group.id)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer ${
-                      isMember
-                        ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/50'
-                        : 'bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-200'
-                    }`}
-                  >
-                    {isMember ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                        <span>Joined</span>
-                      </>
-                    ) : (
+                  {isCreator ? (
+                    <div className="px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-900/50">
+                      <Crown className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                      <span>You're Host</span>
+                    </div>
+                  ) : isMember ? (
+                    <button
+                      onClick={() => setGroupToLeave(group)}
+                      title="Click to leave group"
+                      className="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-rose-50 dark:hover:bg-rose-950/50 hover:text-rose-600 hover:border-rose-300 dark:hover:border-rose-800 group/leavebtn"
+                    >
+                      <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 group-hover/leavebtn:hidden" />
+                      <LogOut className="w-3.5 h-3.5 text-rose-500 hidden group-hover/leavebtn:inline" />
+                      <span className="group-hover/leavebtn:hidden">Joined</span>
+                      <span className="hidden group-hover/leavebtn:inline">Leave Group</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => onToggleJoinGroup(group.id)}
+                      className="px-3 py-1.5 rounded-xl bg-stone-100 dark:bg-stone-800 hover:bg-blue-600 hover:text-white dark:hover:bg-blue-600 text-stone-700 dark:text-stone-200 text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer"
+                    >
                       <span>+ Join Group</span>
-                    )}
-                  </button>
+                    </button>
+                  )}
 
                   <button
                     onClick={() => onSelectGroupMaterials(group.id)}
@@ -335,7 +380,46 @@ export default function StudyGroupsList({
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
+      {/* Leave Confirmation Modal (for non-creator members) */}
+      {groupToLeave && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white dark:bg-stone-900 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-2xl max-w-md w-full p-6 animate-in zoom-in-95">
+            <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-950/50 border border-amber-100 dark:border-amber-900 text-amber-600 dark:text-amber-400 flex items-center justify-center mb-4">
+              <LogOut className="w-6 h-6" />
+            </div>
+            <h3 className="text-lg font-bold text-stone-900 dark:text-stone-100 mb-1">
+              Leave Study Group?
+            </h3>
+            <p className="text-xs sm:text-sm text-stone-600 dark:text-stone-300 mb-6 leading-relaxed">
+              Are you sure you want to leave <strong className="text-stone-900 dark:text-stone-100">{groupToLeave.name}</strong>? 
+              You will no longer be listed as a member of this study circle, but you can rejoin anytime.
+            </p>
+
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setGroupToLeave(null)}
+                className="px-4 py-2 rounded-xl border border-stone-200 dark:border-stone-700 text-stone-700 dark:text-stone-300 text-xs font-semibold hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onToggleJoinGroup(groupToLeave.id);
+                  setGroupToLeave(null);
+                }}
+                className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Leave Group</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal (only available to the creator) */}
       {groupToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in">
           <div className="bg-white dark:bg-stone-900 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-2xl max-w-md w-full p-6 animate-in zoom-in-95">
@@ -347,7 +431,7 @@ export default function StudyGroupsList({
             </h3>
             <p className="text-xs sm:text-sm text-stone-600 dark:text-stone-300 mb-6 leading-relaxed">
               Are you sure you want to delete <strong className="text-stone-900 dark:text-stone-100">{groupToDelete.name}</strong>? 
-              This will remove this group from your active study circles.
+              As the group creator, deleting this will remove it for all members and cannot be undone.
             </p>
 
             <div className="flex items-center justify-end gap-3">

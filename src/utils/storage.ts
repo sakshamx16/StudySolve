@@ -237,9 +237,16 @@ export async function saveSharedGroupToApi(group: StudyGroup): Promise<void> {
   }
 }
 
-export async function deleteSharedGroupFromApi(groupId: string): Promise<void> {
+export async function deleteSharedGroupFromApi(groupId: string, userId?: string): Promise<void> {
   try {
-    await fetch(`/api/groups/${groupId}`, { method: 'DELETE' });
+    await fetch(`/api/groups/${groupId}`, { 
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(userId ? { 'x-user-id': userId } : {})
+      },
+      body: JSON.stringify({ userId })
+    });
   } catch {
     // Silent catch
   }
