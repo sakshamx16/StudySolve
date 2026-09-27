@@ -178,9 +178,27 @@ app.post("/api/ai-chat", async (req, res) => {
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true, hmr: false },
+      server: { middlewareMode: true, hmr: false, ws: false },
       appType: "spa",
     });
+
+    // Cleanly disable Vite client WebSocket connection since HMR is disabled in this environment
+    app.get("/@vite/client", async (_req, res, next) => {
+      try {
+        const mod = await vite.transformRequest("/@vite/client");
+        if (mod && mod.code) {
+          const cleanCode = mod.code
+            .replace("transport.connect(createHMRHandler(handleMessage));", "/* HMR WebSocket disabled in environment */")
+            .replace("console.error(`[vite] failed to connect to websocket", "console.debug(`[vite] HMR notice");
+          res.setHeader("Content-Type", "application/javascript");
+          return res.send(cleanCode);
+        }
+      } catch {
+        // fallback
+      }
+      next();
+    });
+
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");

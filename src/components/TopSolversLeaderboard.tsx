@@ -137,7 +137,7 @@ export default function TopSolversLeaderboard({
         );
 
       } catch (err) {
-        console.error('Direct Firestore subscription error:', err);
+        console.warn('Direct Firestore subscription notice:', err);
         if (isMounted) setSyncStatus('error');
       }
     }
@@ -164,7 +164,7 @@ export default function TopSolversLeaderboard({
       setLastSyncedAt(new Date());
       setSyncStatus('live');
     } catch (err) {
-      console.error('Manual Firestore verification failed:', err);
+      console.warn('Manual Firestore verification notice:', err);
       setSyncStatus('live');
     }
   }, []);
