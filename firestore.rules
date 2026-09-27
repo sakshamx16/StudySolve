@@ -10,45 +10,28 @@ service cloud.firestore {
     // Users profile
     match /users/{userId} {
       allow read: if true;
-      allow write: if isSignedIn() && (request.auth.uid == userId);
+      allow write: if true;
     }
 
-    // Study groups
+    // Study groups (open and collaborative for peer learning)
     match /study_groups/{groupId} {
       allow read: if true;
-      allow create, update: if isSignedIn();
-      allow delete: if isSignedIn() && (
-        resource.data.createdByUid == request.auth.uid ||
-        resource.data.createdByUid == null
-      );
+      allow create, update: if true;
+      allow delete: if true;
     }
 
     // Questions and study materials
     match /materials/{materialId} {
       allow read: if true;
-      allow create: if isSignedIn();
-      // Allow updating solutionsCount, isSolved, ratings
-      allow update: if isSignedIn();
-      // Allow author to delete question if posted mistakenly (or demo questions)
-      allow delete: if isSignedIn() && (
-        resource.data.authorUid == request.auth.uid ||
-        resource.data.author.uid == request.auth.uid ||
-        resource.data.authorUid == null ||
-        resource.data.authorUid == ''
-      );
+      allow create, update: if true;
+      allow delete: if true;
     }
 
     // Solutions posted by students
     match /solutions/{solutionId} {
       allow read: if true;
-      allow create: if isSignedIn();
-      // Allow updating reviews, ratings, votes
-      allow update: if isSignedIn();
-      allow delete: if isSignedIn() && (
-        resource.data.authorUid == request.auth.uid ||
-        resource.data.author.uid == request.auth.uid ||
-        resource.data.authorUid == null
-      );
+      allow create, update: if true;
+      allow delete: if true;
     }
   }
 }

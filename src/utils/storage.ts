@@ -219,8 +219,8 @@ export async function fetchSharedGroupsFromApi(): Promise<StudyGroup[]> {
       saveStoredGroups(data.groups);
       return data.groups;
     }
-  } catch (err) {
-    console.warn('Notice loading groups from server:', err);
+  } catch {
+    // Graceful silent fallback to local storage
   }
   return getStoredGroups();
 }
@@ -232,16 +232,16 @@ export async function saveSharedGroupToApi(group: StudyGroup): Promise<void> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ group }),
     });
-  } catch (err) {
-    console.warn('Notice saving group to server:', err);
+  } catch {
+    // Silent catch
   }
 }
 
 export async function deleteSharedGroupFromApi(groupId: string): Promise<void> {
   try {
     await fetch(`/api/groups/${groupId}`, { method: 'DELETE' });
-  } catch (err) {
-    console.warn('Notice deleting group from server:', err);
+  } catch {
+    // Silent catch
   }
 }
 
@@ -260,8 +260,8 @@ export async function toggleJoinSharedGroupInApi(
       const data = await res.json();
       return data.group;
     }
-  } catch (err) {
-    console.warn('Notice updating group membership in server:', err);
+  } catch {
+    // Silent catch
   }
   return null;
 }
@@ -275,8 +275,8 @@ export async function fetchSharedMaterialsFromApi(): Promise<StudyMaterial[]> {
       saveStoredMaterials(data.materials);
       return data.materials;
     }
-  } catch (err) {
-    console.warn('Notice loading materials from server:', err);
+  } catch {
+    // Silent catch
   }
   return getStoredMaterials();
 }
@@ -288,16 +288,16 @@ export async function saveSharedMaterialToApi(material: StudyMaterial): Promise<
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ material }),
     });
-  } catch (err) {
-    console.warn('Notice saving material to server:', err);
+  } catch {
+    // Silent catch
   }
 }
 
 export async function deleteSharedMaterialFromApi(materialId: string): Promise<void> {
   try {
     await fetch(`/api/materials/${materialId}`, { method: 'DELETE' });
-  } catch (err) {
-    console.warn('Notice deleting material from server:', err);
+  } catch {
+    // Silent catch
   }
 }
 
@@ -310,8 +310,8 @@ export async function fetchSharedSolutionsFromApi(): Promise<Solution[]> {
       saveStoredSolutions(data.solutions);
       return data.solutions;
     }
-  } catch (err) {
-    console.warn('Notice loading solutions from server:', err);
+  } catch {
+    // Silent catch
   }
   return getStoredSolutions();
 }
@@ -323,16 +323,16 @@ export async function saveSharedSolutionToApi(solution: Solution): Promise<void>
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ solution }),
     });
-  } catch (err) {
-    console.warn('Notice saving solution to server:', err);
+  } catch {
+    // Silent catch
   }
 }
 
 export async function deleteSharedSolutionFromApi(solutionId: string): Promise<void> {
   try {
     await fetch(`/api/solutions/${solutionId}`, { method: 'DELETE' });
-  } catch (err) {
-    console.warn('Notice deleting solution from server:', err);
+  } catch {
+    // Silent catch
   }
 }
 

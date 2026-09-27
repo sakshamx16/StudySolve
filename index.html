@@ -12,6 +12,22 @@
           }
           origConsoleError.apply(console, arguments);
         };
+        var origConsoleDebug = console.debug;
+        console.debug = function() {
+          var msg = arguments[0];
+          if (typeof msg === 'string' && (msg.indexOf('[vite]') !== -1 || msg.indexOf('WebSocket') !== -1)) {
+            return;
+          }
+          if (origConsoleDebug) origConsoleDebug.apply(console, arguments);
+        };
+        var origConsoleWarn = console.warn;
+        console.warn = function() {
+          var msg = arguments[0];
+          if (typeof msg === 'string' && (msg.indexOf('[vite]') !== -1 || msg.indexOf('WebSocket') !== -1)) {
+            return;
+          }
+          if (origConsoleWarn) origConsoleWarn.apply(console, arguments);
+        };
         var isWsNotice = function(val) {
           if (!val) return false;
           var str = String(val.message || val.reason || val || '');

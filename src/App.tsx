@@ -418,8 +418,8 @@ export default function App() {
       }
     });
 
-    // 2. Poll every 4 seconds so that Account B automatically discovers any group created by Account A
-    const syncInterval = setInterval(() => {
+    // 2. Light fallback refresh on window focus or 30s interval (real-time is driven by Firestore listeners)
+    const refreshFromServer = () => {
       fetchSharedGroupsFromApi().then((serverGroups) => {
         if (serverGroups && Array.isArray(serverGroups)) {
           const valid = serverGroups.filter((g) => !LEGACY_DUMMY_GROUP_IDS.includes(g.id));
@@ -430,7 +430,7 @@ export default function App() {
             return prev;
           });
         }
-      });
+      }).catch(() => {});
 
       fetchSharedMaterialsFromApi().then((serverMats) => {
         if (serverMats && Array.isArray(serverMats)) {
@@ -441,7 +441,7 @@ export default function App() {
             return prev;
           });
         }
-      });
+      }).catch(() => {});
 
       fetchSharedSolutionsFromApi().then((serverSols) => {
         if (serverSols && Array.isArray(serverSols)) {
@@ -452,8 +452,11 @@ export default function App() {
             return prev;
           });
         }
-      });
-    }, 4000);
+      }).catch(() => {});
+    };
+
+    window.addEventListener('focus', refreshFromServer);
+    const syncInterval = setInterval(refreshFromServer, 30000);
 
     const unsubGroups = subscribeToFirestoreGroups((liveGroups) => {
       if (liveGroups && Array.isArray(liveGroups)) {
@@ -481,6 +484,7 @@ export default function App() {
     });
 
     return () => {
+      window.removeEventListener('focus', refreshFromServer);
       clearInterval(syncInterval);
       unsubGroups();
       unsubMaterials();

@@ -10,6 +10,17 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 
+// Enable CORS and preflight handling for all API requests
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 // Allow JSON payloads up to 25MB for image attachments
 app.use(express.json({ limit: "25mb" }));
 
@@ -391,9 +402,12 @@ async function startServer() {
       try {
         const mod = await vite.transformRequest("/@vite/client");
         if (mod && mod.code) {
-          const cleanCode = mod.code
+          let cleanCode = mod.code
+            .replaceAll('console.debug("[vite] connecting...");', '/* [vite] connection disabled */')
+            .replaceAll('console.debug(`[vite] connecting...`);', '/* [vite] connection disabled */')
             .replace("transport.connect(createHMRHandler(handleMessage));", "/* HMR WebSocket disabled in environment */")
-            .replace("console.error(`[vite] failed to connect to websocket", "console.debug(`[vite] HMR notice");
+            .replace(/console\.error\(`\[vite\] failed to connect to websocket[^`]*`\);?/g, '/* silenced */')
+            .replace(/console\.debug\(`\[vite\][^`]*`\);?/g, '/* silenced */');
           res.setHeader("Content-Type", "application/javascript");
           return res.send(cleanCode);
         }
