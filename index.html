@@ -4,6 +4,14 @@
     <meta charset="UTF-8" />
     <script>
       (function() {
+        var origConsoleError = console.error;
+        console.error = function() {
+          var msg = arguments[0];
+          if (typeof msg === 'string' && (msg.indexOf('[vite]') !== -1 || msg.indexOf('WebSocket') !== -1)) {
+            return;
+          }
+          origConsoleError.apply(console, arguments);
+        };
         var isWsNotice = function(val) {
           if (!val) return false;
           var str = String(val.message || val.reason || val || '');

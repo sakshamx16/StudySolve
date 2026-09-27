@@ -11,7 +11,8 @@ import {
   Trash2,
   HelpCircle,
   Lightbulb,
-  CheckCircle2
+  CheckCircle2,
+  RotateCcw
 } from 'lucide-react';
 
 interface ChatMessage {
@@ -20,6 +21,30 @@ interface ChatMessage {
   text: string;
   imagePreview?: string;
   timestamp: string;
+  isError?: boolean;
+  retryPayload?: {
+    prompt: string;
+    imageBase64?: string;
+    imageMimeType?: string;
+    previewUrl?: string;
+  };
+}
+
+function parseErrorMessage(err: any): string {
+  if (!err) return 'Please verify your network and try again.';
+  let msg = typeof err === 'string' ? err : err.message || '';
+  try {
+    const parsed = JSON.parse(msg);
+    if (parsed?.error?.message) {
+      return parsed.error.message;
+    }
+  } catch {
+    // not JSON
+  }
+  if (msg.includes('503') || msg.includes('high demand') || msg.includes('UNAVAILABLE')) {
+    return 'The AI Tutor model is currently experiencing high demand. Spikes are temporary—click "Retry Question" below to try again.';
+  }
+  return msg;
 }
 
 export default function AIChatbox() {
@@ -142,11 +167,74 @@ export default function AIChatbox() {
       setMessages((prev) => [...prev, assistantMessage]);
     } catch (err: any) {
       console.error('AI Tutor error:', err);
+      const cleanErr = parseErrorMessage(err);
       const errorMessage: ChatMessage = {
         id: `err-${Date.now()}`,
         role: 'assistant',
-        text: `⚠️ **Could not connect to AI Tutor**: ${err.message || 'Please verify your network or try again in a moment.'}`,
+        text: `⚠️ **Could not connect to AI Tutor**: ${cleanErr}`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isError: true,
+        retryPayload: {
+          prompt: userText,
+          imageBase64: currentImg?.base64,
+          imageMimeType: currentImg?.mimeType,
+          previewUrl: currentImg?.previewUrl,
+        },
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleRetry = async (payload?: ChatMessage['retryPayload']) => {
+    if (!payload || isLoading) return;
+    setIsLoading(true);
+    try {
+      const history = messages
+        .filter((m) => m.id !== 'welcome' && !m.isError)
+        .map((m) => ({
+          role: m.role,
+          text: m.text,
+        }));
+
+      const res = await fetch('/api/ai-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: payload.prompt,
+          imageBase64: payload.imageBase64,
+          imageMimeType: payload.imageMimeType,
+          history,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Server error');
+      }
+
+      // Remove the error message that was retried
+      setMessages((prev) => prev.filter((m) => !m.isError));
+
+      const assistantMessage: ChatMessage = {
+        id: `ast-${Date.now()}`,
+        role: 'assistant',
+        text: data.reply,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+
+      setMessages((prev) => [...prev, assistantMessage]);
+    } catch (err: any) {
+      console.error('AI Tutor error during retry:', err);
+      const cleanErr = parseErrorMessage(err);
+      const errorMessage: ChatMessage = {
+        id: `err-${Date.now()}`,
+        role: 'assistant',
+        text: `⚠️ **Could not connect to AI Tutor**: ${cleanErr}`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isError: true,
+        retryPayload: payload,
       };
       setMessages((prev) => [...prev, errorMessage]);
     } finally {
@@ -240,6 +328,8 @@ export default function AIChatbox() {
                       className={`max-w-[88%] rounded-2xl px-3.5 py-2.5 leading-relaxed backdrop-blur-md ${
                         msg.role === 'user'
                           ? 'bg-blue-600/75 text-white rounded-br-xs border border-blue-400/30 shadow-md'
+                          : msg.isError
+                          ? 'bg-amber-50/95 text-amber-950 border border-amber-300 rounded-bl-xs shadow-md'
                           : 'bg-white/80 text-stone-900 border border-white/40 rounded-bl-xs shadow-md'
                       }`}
                     >
@@ -258,6 +348,21 @@ export default function AIChatbox() {
                       <div className="whitespace-pre-wrap font-sans text-xs break-words">
                         {msg.text}
                       </div>
+
+                      {/* Retry Button on Error */}
+                      {msg.isError && msg.retryPayload && (
+                        <div className="mt-2.5 pt-2 border-t border-amber-200/60">
+                          <button
+                            type="button"
+                            onClick={() => handleRetry(msg.retryPayload)}
+                            disabled={isLoading}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 active:bg-amber-800 disabled:opacity-50 text-white font-medium text-xs shadow-xs transition-colors cursor-pointer"
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                            <span>Retry Question</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                     <span className="text-[10px] text-stone-300 mt-1 px-1 drop-shadow-xs">
                       {msg.role === 'user' ? 'You' : 'AI Tutor'} • {msg.timestamp}

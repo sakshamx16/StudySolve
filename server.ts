@@ -20,7 +20,14 @@ function getAIClient(): GoogleGenAI {
     if (!apiKey) {
       throw new Error("GEMINI_API_KEY environment variable is not configured.");
     }
-    aiClient = new GoogleGenAI({ apiKey });
+    aiClient = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
   }
   return aiClient;
 }
@@ -29,6 +36,13 @@ function getAIClient(): GoogleGenAI {
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
+
+// Candidate models in priority order for highest availability, lowest latency, and minimal demand spikes
+const CANDIDATE_MODELS = [
+  "gemini-3.1-flash-lite",
+  "gemini-flash-latest",
+  "gemini-3.8-flash",
+];
 
 // AI Study Assistant Chat endpoint (supports text + image analysis)
 app.post("/api/ai-chat", async (req, res) => {
@@ -85,17 +99,72 @@ app.post("/api/ai-chat", async (req, res) => {
       parts: currentParts,
     });
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.8-flash",
-      contents,
-      config: {
-        systemInstruction,
-        temperature: 0.3,
-      },
-    });
+    let replyText: string | null = null;
+    let lastError: any = null;
 
-    const replyText = response.text || "I was unable to formulate an explanation. Please try providing more context or a clearer photo.";
-    return res.json({ reply: replyText });
+    // Resilient fallback across supported models to handle spikes in demand (503/429)
+    for (const model of CANDIDATE_MODELS) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents,
+          config: {
+            systemInstruction,
+            temperature: 0.3,
+          },
+        });
+
+        if (response && response.text) {
+          replyText = response.text;
+          break;
+        }
+      } catch (err: any) {
+        lastError = err;
+
+        // Check for 503 (high demand) or 429 (rate limit) to try fallback model
+        const isTemporary =
+          err?.status === 503 ||
+          err?.status === 429 ||
+          err?.code === 503 ||
+          err?.code === 429 ||
+          err?.message?.includes("503") ||
+          err?.message?.includes("high demand") ||
+          err?.message?.includes("UNAVAILABLE") ||
+          err?.message?.includes("RESOURCE_EXHAUSTED");
+
+        if (isTemporary) {
+          // Brief pause before switching to the next candidate model
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          continue;
+        }
+
+        // For other errors, continue to the next model in the fallback chain
+        continue;
+      }
+    }
+
+    if (replyText) {
+      return res.json({ reply: replyText });
+    }
+
+    // If all models failed, formulate a clean, human-readable error response
+    let cleanMessage = "The AI Tutor is currently experiencing high demand. Please try again in a few moments.";
+    if (lastError?.message) {
+      try {
+        const parsed = JSON.parse(lastError.message);
+        if (parsed?.error?.message) {
+          cleanMessage = parsed.error.message;
+        }
+      } catch {
+        cleanMessage = lastError.message;
+      }
+    }
+
+    console.error("All AI Tutor candidate models exhausted:", lastError);
+    return res.status(503).json({
+      error: cleanMessage,
+      fallback: "AI Tutor is currently busy. Please click Retry or try again in a few moments.",
+    });
   } catch (error: any) {
     console.error("AI Chat Assistant error:", error);
     return res.status(500).json({
