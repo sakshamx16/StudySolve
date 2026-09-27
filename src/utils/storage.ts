@@ -205,3 +205,134 @@ export function resetToDemoData(): void {
   localStorage.setItem(SOLUTIONS_STORAGE_KEY, JSON.stringify(initialSolutions));
   localStorage.removeItem(USER_STORAGE_KEY);
 }
+
+// -------------------------------------------------------------
+// Cross-Account Server Synchronizers
+// -------------------------------------------------------------
+
+export async function fetchSharedGroupsFromApi(): Promise<StudyGroup[]> {
+  try {
+    const res = await fetch('/api/groups');
+    if (!res.ok) return getStoredGroups();
+    const data = await res.json();
+    if (Array.isArray(data.groups)) {
+      saveStoredGroups(data.groups);
+      return data.groups;
+    }
+  } catch (err) {
+    console.warn('Notice loading groups from server:', err);
+  }
+  return getStoredGroups();
+}
+
+export async function saveSharedGroupToApi(group: StudyGroup): Promise<void> {
+  try {
+    await fetch('/api/groups', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ group }),
+    });
+  } catch (err) {
+    console.warn('Notice saving group to server:', err);
+  }
+}
+
+export async function deleteSharedGroupFromApi(groupId: string): Promise<void> {
+  try {
+    await fetch(`/api/groups/${groupId}`, { method: 'DELETE' });
+  } catch (err) {
+    console.warn('Notice deleting group from server:', err);
+  }
+}
+
+export async function toggleJoinSharedGroupInApi(
+  groupId: string, 
+  userId: string, 
+  isJoining: boolean
+): Promise<StudyGroup | null> {
+  try {
+    const res = await fetch(`/api/groups/${groupId}/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, isJoining }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.group;
+    }
+  } catch (err) {
+    console.warn('Notice updating group membership in server:', err);
+  }
+  return null;
+}
+
+export async function fetchSharedMaterialsFromApi(): Promise<StudyMaterial[]> {
+  try {
+    const res = await fetch('/api/materials');
+    if (!res.ok) return getStoredMaterials();
+    const data = await res.json();
+    if (Array.isArray(data.materials)) {
+      saveStoredMaterials(data.materials);
+      return data.materials;
+    }
+  } catch (err) {
+    console.warn('Notice loading materials from server:', err);
+  }
+  return getStoredMaterials();
+}
+
+export async function saveSharedMaterialToApi(material: StudyMaterial): Promise<void> {
+  try {
+    await fetch('/api/materials', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ material }),
+    });
+  } catch (err) {
+    console.warn('Notice saving material to server:', err);
+  }
+}
+
+export async function deleteSharedMaterialFromApi(materialId: string): Promise<void> {
+  try {
+    await fetch(`/api/materials/${materialId}`, { method: 'DELETE' });
+  } catch (err) {
+    console.warn('Notice deleting material from server:', err);
+  }
+}
+
+export async function fetchSharedSolutionsFromApi(): Promise<Solution[]> {
+  try {
+    const res = await fetch('/api/solutions');
+    if (!res.ok) return getStoredSolutions();
+    const data = await res.json();
+    if (Array.isArray(data.solutions)) {
+      saveStoredSolutions(data.solutions);
+      return data.solutions;
+    }
+  } catch (err) {
+    console.warn('Notice loading solutions from server:', err);
+  }
+  return getStoredSolutions();
+}
+
+export async function saveSharedSolutionToApi(solution: Solution): Promise<void> {
+  try {
+    await fetch('/api/solutions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ solution }),
+    });
+  } catch (err) {
+    console.warn('Notice saving solution to server:', err);
+  }
+}
+
+export async function deleteSharedSolutionFromApi(solutionId: string): Promise<void> {
+  try {
+    await fetch(`/api/solutions/${solutionId}`, { method: 'DELETE' });
+  } catch (err) {
+    console.warn('Notice deleting solution from server:', err);
+  }
+}
+

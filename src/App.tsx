@@ -36,7 +36,17 @@ import {
   getStoredUser, 
   saveStoredUser,
   clearStoredUser,
-  resetToDemoData 
+  resetToDemoData,
+  fetchSharedGroupsFromApi,
+  saveSharedGroupToApi,
+  deleteSharedGroupFromApi,
+  toggleJoinSharedGroupInApi,
+  fetchSharedMaterialsFromApi,
+  saveSharedMaterialToApi,
+  deleteSharedMaterialFromApi,
+  fetchSharedSolutionsFromApi,
+  saveSharedSolutionToApi,
+  deleteSharedSolutionFromApi
 } from './utils/storage';
 import { getStudentAvatar } from './utils/avatar';
 import { ThemeMode, getInitialTheme, applyTheme, saveThemePreference } from './utils/theme';
@@ -377,7 +387,7 @@ export default function App() {
     };
   }, []);
 
-  // Real-time Firestore sync for materials, solutions, and user-created groups
+  // Real-time server and Firestore sync for shared groups, materials, and solutions across all accounts
   useEffect(() => {
     const LEGACY_DUMMY_GROUP_IDS = [
       'grp-accounting',
@@ -387,6 +397,63 @@ export default function App() {
       'grp-finance',
       'grp-law'
     ];
+
+    // 1. Initial load from shared server backend
+    fetchSharedGroupsFromApi().then((serverGroups) => {
+      if (serverGroups && Array.isArray(serverGroups)) {
+        const valid = serverGroups.filter((g) => !LEGACY_DUMMY_GROUP_IDS.includes(g.id));
+        setGroups(valid);
+      }
+    });
+
+    fetchSharedMaterialsFromApi().then((serverMats) => {
+      if (serverMats && Array.isArray(serverMats) && serverMats.length > 0) {
+        setMaterials(serverMats);
+      }
+    });
+
+    fetchSharedSolutionsFromApi().then((serverSols) => {
+      if (serverSols && Array.isArray(serverSols) && serverSols.length > 0) {
+        setSolutions(serverSols);
+      }
+    });
+
+    // 2. Poll every 4 seconds so that Account B automatically discovers any group created by Account A
+    const syncInterval = setInterval(() => {
+      fetchSharedGroupsFromApi().then((serverGroups) => {
+        if (serverGroups && Array.isArray(serverGroups)) {
+          const valid = serverGroups.filter((g) => !LEGACY_DUMMY_GROUP_IDS.includes(g.id));
+          setGroups((prev) => {
+            if (JSON.stringify(prev) !== JSON.stringify(valid)) {
+              return valid;
+            }
+            return prev;
+          });
+        }
+      });
+
+      fetchSharedMaterialsFromApi().then((serverMats) => {
+        if (serverMats && Array.isArray(serverMats)) {
+          setMaterials((prev) => {
+            if (JSON.stringify(prev) !== JSON.stringify(serverMats)) {
+              return serverMats;
+            }
+            return prev;
+          });
+        }
+      });
+
+      fetchSharedSolutionsFromApi().then((serverSols) => {
+        if (serverSols && Array.isArray(serverSols)) {
+          setSolutions((prev) => {
+            if (JSON.stringify(prev) !== JSON.stringify(serverSols)) {
+              return serverSols;
+            }
+            return prev;
+          });
+        }
+      });
+    }, 4000);
 
     const unsubGroups = subscribeToFirestoreGroups((liveGroups) => {
       if (liveGroups && Array.isArray(liveGroups)) {
@@ -414,6 +481,7 @@ export default function App() {
     });
 
     return () => {
+      clearInterval(syncInterval);
       unsubGroups();
       unsubMaterials();
       unsubSolutions();
@@ -518,19 +586,28 @@ export default function App() {
   const handleAddMaterial = (newMaterial: StudyMaterial) => {
     setMaterials((prev) => [newMaterial, ...prev]);
 
+    // Save to shared server API so all accounts receive it immediately
+    saveSharedMaterialToApi(newMaterial).catch(() => {});
+
     // Save to Firestore
     addMaterialToFirestore(newMaterial).catch((err) => {
-      console.warn('Could not sync material to Firestore:', err);
+      console.info('Firestore material sync notice:', err);
     });
 
     // Update group's materials count
-    setGroups((prev) =>
-      prev.map((g) =>
-        g.id === newMaterial.groupId
-          ? { ...g, materialsCount: g.materialsCount + 1 }
-          : g
-      )
-    );
+    if (newMaterial.groupId) {
+      setGroups((prev) =>
+        prev.map((g) => {
+          if (g.id === newMaterial.groupId) {
+            const updated = { ...g, materialsCount: g.materialsCount + 1 };
+            saveSharedGroupToApi(updated).catch(() => {});
+            addGroupToFirestore(updated).catch(() => {});
+            return updated;
+          }
+          return g;
+        })
+      );
+    }
 
     // Update user stats
     setUser((prev) => ({
@@ -542,10 +619,11 @@ export default function App() {
 
   // Handler: Delete study material (for questions sent mistakenly)
   const handleDeleteMaterial = async (materialId: string) => {
+    deleteSharedMaterialFromApi(materialId).catch(() => {});
     try {
       await deleteMaterialFromFirestore(materialId);
     } catch (err) {
-      console.warn('Could not delete from Firestore:', err);
+      console.info('Firestore material delete notice:', err);
     }
     setMaterials((prev) => prev.filter((m) => m.id !== materialId));
     setSolutions((prev) => prev.filter((s) => s.materialId !== materialId));
@@ -598,9 +676,12 @@ export default function App() {
 
     setSolutions((prev) => [newSolution, ...prev]);
 
+    // Save to shared server API so all accounts receive it immediately
+    saveSharedSolutionToApi(newSolution).catch(() => {});
+
     // Save to Firestore
     addSolutionToFirestore(newSolution).catch((err) => {
-      console.warn('Could not sync solution to Firestore:', err);
+      console.info('Firestore solution sync notice:', err);
     });
 
     // Mark material as solved and increment count
@@ -743,10 +824,9 @@ export default function App() {
 
     const currentUid = user.authUid || user.id;
     const isMember = 
-      targetGroup.isJoined || 
       user.joinedGroupIds.includes(groupId) ||
-      targetGroup.createdByUid === currentUid ||
-      targetGroup.memberUids?.includes(currentUid);
+      (currentUid && currentUid !== 'guest' && targetGroup.createdByUid === currentUid) ||
+      (currentUid && currentUid !== 'guest' && targetGroup.memberUids?.includes(currentUid));
 
     // If private and not joined yet, open Join with Code modal!
     if (targetGroup.privacy === 'private' && !isMember) {
@@ -756,10 +836,11 @@ export default function App() {
       return;
     }
 
+    const nowJoined = !isMember;
+
     setGroups((prev) =>
       prev.map((g) => {
         if (g.id !== groupId) return g;
-        const nowJoined = !isMember;
         const updatedMemberUids = nowJoined
           ? Array.from(new Set([...(g.memberUids || []), currentUid]))
           : (g.memberUids || []).filter((uid) => uid !== currentUid);
@@ -770,13 +851,17 @@ export default function App() {
           memberCount: nowJoined ? g.memberCount + 1 : Math.max(1, g.memberCount - 1),
           memberUids: updatedMemberUids,
         };
+        saveSharedGroupToApi(updated).catch(() => {});
         addGroupToFirestore(updated).catch(() => {});
         return updated;
       })
     );
 
+    if (currentUid && currentUid !== 'guest') {
+      toggleJoinSharedGroupInApi(groupId, currentUid, nowJoined).catch(() => {});
+    }
+
     setUser((prev) => {
-      const nowJoined = !isMember;
       const updatedUser: UserProfile = {
         ...prev,
         joinedGroupIds: nowJoined
@@ -812,6 +897,7 @@ export default function App() {
     setUser(updatedUser);
     saveStoredUser(updatedUser);
 
+    saveSharedGroupToApi(updatedGroup).catch(() => {});
     addGroupToFirestore(updatedGroup).catch(() => {});
     syncUserProfileToFirestore(updatedUser).catch(() => {});
     setSelectedGroupId(targetGroup.id);
@@ -825,6 +911,7 @@ export default function App() {
     if (inviteGroup && inviteGroup.id === updatedGroup.id) {
       setInviteGroup(updatedGroup);
     }
+    saveSharedGroupToApi(updatedGroup).catch(() => {});
     addGroupToFirestore(updatedGroup).catch(() => {});
   };
 
@@ -840,8 +927,13 @@ export default function App() {
       syncUserProfileToFirestore(updatedUser).catch(() => {});
       return updatedUser;
     });
+
+    // Save to shared server API so all other accounts immediately receive it
+    saveSharedGroupToApi(newGroup).catch(() => {});
+
+    // Save to Firestore
     addGroupToFirestore(newGroup).catch((err) => {
-      console.warn('Could not save group to Firestore:', err);
+      console.info('Firestore group save notice:', err);
     });
 
     // If it's a private group, immediately open invite modal so creator can share code/link!
@@ -856,12 +948,17 @@ export default function App() {
     if (selectedGroupId === groupId) {
       setSelectedGroupId(null);
     }
-    setUser((prev) => ({
-      ...prev,
-      joinedGroupIds: prev.joinedGroupIds.filter((id) => id !== groupId),
-    }));
+    setUser((prev) => {
+      const updatedUser = {
+        ...prev,
+        joinedGroupIds: prev.joinedGroupIds.filter((id) => id !== groupId),
+      };
+      saveStoredUser(updatedUser);
+      return updatedUser;
+    });
+    deleteSharedGroupFromApi(groupId).catch(() => {});
     deleteGroupFromFirestore(groupId).catch((err) => {
-      console.warn('Could not delete group from Firestore:', err);
+      console.info('Firestore group delete notice:', err);
     });
   };
 

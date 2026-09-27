@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
@@ -11,6 +12,209 @@ const PORT = 3000;
 
 // Allow JSON payloads up to 25MB for image attachments
 app.use(express.json({ limit: "25mb" }));
+
+// -----------------------------------------------------------------
+// Shared Study Groups & Academic Hub Persistence (Multi-Account Sync)
+// -----------------------------------------------------------------
+const DATA_DIR = path.join(process.cwd(), "data");
+const GROUPS_FILE = path.join(DATA_DIR, "shared_groups.json");
+const MATERIALS_FILE = path.join(DATA_DIR, "shared_materials.json");
+const SOLUTIONS_FILE = path.join(DATA_DIR, "shared_solutions.json");
+
+function readJsonFile<T>(filePath: string, fallback: T): T {
+  try {
+    if (!fs.existsSync(filePath)) {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, JSON.stringify(fallback, null, 2), "utf8");
+      return fallback;
+    }
+    const content = fs.readFileSync(filePath, "utf8");
+    return JSON.parse(content);
+  } catch (err) {
+    console.warn(`Notice reading ${filePath}:`, err);
+    return fallback;
+  }
+}
+
+function writeJsonFile<T>(filePath: string, data: T): void {
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
+  } catch (err) {
+    console.warn(`Notice writing ${filePath}:`, err);
+  }
+}
+
+// GET all shared study groups
+app.get("/api/groups", (_req, res) => {
+  const groups = readJsonFile<any[]>(GROUPS_FILE, []);
+  res.json({ groups });
+});
+
+// POST /api/groups - Add or update a study group (immediately shared across all accounts)
+app.post("/api/groups", (req, res) => {
+  try {
+    const { group } = req.body;
+    if (!group || !group.id || !group.name) {
+      return res.status(400).json({ error: "Missing required group fields" });
+    }
+    const groups = readJsonFile<any[]>(GROUPS_FILE, []);
+    const existingIndex = groups.findIndex((g) => g.id === group.id);
+    if (existingIndex >= 0) {
+      groups[existingIndex] = { ...groups[existingIndex], ...group };
+    } else {
+      groups.unshift(group);
+    }
+    writeJsonFile(GROUPS_FILE, groups);
+    res.json({ success: true, group });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to save group" });
+  }
+});
+
+// DELETE /api/groups/:id - Delete a study group
+app.delete("/api/groups/:id", (req, res) => {
+  try {
+    const { id } = req.params;
+    let groups = readJsonFile<any[]>(GROUPS_FILE, []);
+    groups = groups.filter((g) => g.id !== id);
+    writeJsonFile(GROUPS_FILE, groups);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to delete group" });
+  }
+});
+
+// POST /api/groups/:id/join - Join or leave group
+app.post("/api/groups/:id/join", (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId, isJoining } = req.body;
+    const groups = readJsonFile<any[]>(GROUPS_FILE, []);
+    const targetGroup = groups.find((g) => g.id === id);
+    if (!targetGroup) {
+      return res.status(404).json({ error: "Group not found" });
+    }
+    const currentMembers: string[] = targetGroup.memberUids || [];
+    let updatedMembers = [...currentMembers];
+    if (isJoining) {
+      if (userId && !updatedMembers.includes(userId)) {
+        updatedMembers.push(userId);
+      }
+    } else {
+      if (userId) {
+        updatedMembers = updatedMembers.filter((u) => u !== userId);
+      }
+    }
+    targetGroup.memberUids = updatedMembers;
+    targetGroup.memberCount = Math.max(1, updatedMembers.length);
+    writeJsonFile(GROUPS_FILE, groups);
+    res.json({ success: true, group: targetGroup });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to join group" });
+  }
+});
+
+// GET /api/materials
+app.get("/api/materials", (_req, res) => {
+  const materials = readJsonFile<any[]>(MATERIALS_FILE, []);
+  res.json({ materials });
+});
+
+// POST /api/materials
+app.post("/api/materials", (req, res) => {
+  try {
+    const { material } = req.body;
+    if (!material || !material.id) {
+      return res.status(400).json({ error: "Missing required material fields" });
+    }
+    const materials = readJsonFile<any[]>(MATERIALS_FILE, []);
+    const existingIdx = materials.findIndex((m) => m.id === material.id);
+    if (existingIdx >= 0) {
+      materials[existingIdx] = { ...materials[existingIdx], ...material };
+    } else {
+      materials.unshift(material);
+    }
+    writeJsonFile(MATERIALS_FILE, materials);
+
+    // If belongs to group, update group's materialsCount
+    if (material.groupId) {
+      const groups = readJsonFile<any[]>(GROUPS_FILE, []);
+      const grp = groups.find((g) => g.id === material.groupId);
+      if (grp) {
+        grp.materialsCount = (grp.materialsCount || 0) + (existingIdx >= 0 ? 0 : 1);
+        writeJsonFile(GROUPS_FILE, groups);
+      }
+    }
+    res.json({ success: true, material });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to save material" });
+  }
+});
+
+// DELETE /api/materials/:id
+app.delete("/api/materials/:id", (req, res) => {
+  try {
+    const { id } = req.params;
+    let materials = readJsonFile<any[]>(MATERIALS_FILE, []);
+    materials = materials.filter((m) => m.id !== id);
+    writeJsonFile(MATERIALS_FILE, materials);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to delete material" });
+  }
+});
+
+// GET /api/solutions
+app.get("/api/solutions", (_req, res) => {
+  const solutions = readJsonFile<any[]>(SOLUTIONS_FILE, []);
+  res.json({ solutions });
+});
+
+// POST /api/solutions
+app.post("/api/solutions", (req, res) => {
+  try {
+    const { solution } = req.body;
+    if (!solution || !solution.id) {
+      return res.status(400).json({ error: "Missing required solution fields" });
+    }
+    const solutions = readJsonFile<any[]>(SOLUTIONS_FILE, []);
+    const existingIdx = solutions.findIndex((s) => s.id === solution.id);
+    if (existingIdx >= 0) {
+      solutions[existingIdx] = { ...solutions[existingIdx], ...solution };
+    } else {
+      solutions.unshift(solution);
+    }
+    writeJsonFile(SOLUTIONS_FILE, solutions);
+
+    // Also update material solutionsCount & isSolved
+    if (solution.materialId) {
+      const materials = readJsonFile<any[]>(MATERIALS_FILE, []);
+      const mat = materials.find((m) => m.id === solution.materialId);
+      if (mat) {
+        mat.isSolved = true;
+        mat.solutionsCount = (mat.solutionsCount || 0) + (existingIdx >= 0 ? 0 : 1);
+        writeJsonFile(MATERIALS_FILE, materials);
+      }
+    }
+    res.json({ success: true, solution });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to save solution" });
+  }
+});
+
+// DELETE /api/solutions/:id
+app.delete("/api/solutions/:id", (req, res) => {
+  try {
+    const { id } = req.params;
+    let solutions = readJsonFile<any[]>(SOLUTIONS_FILE, []);
+    solutions = solutions.filter((s) => s.id !== id);
+    writeJsonFile(SOLUTIONS_FILE, solutions);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to delete solution" });
+  }
+});
 
 // Lazy initialization for Google GenAI client
 let aiClient: GoogleGenAI | null = null;

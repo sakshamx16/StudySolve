@@ -269,16 +269,40 @@ export function subscribeToFirestoreMaterials(
   );
 }
 
+// Recursively strip undefined properties so setDoc never rejects documents
+export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): Record<string, any> {
+  const result: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      if (value && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
+        result[key] = sanitizeForFirestore(value);
+      } else {
+        result[key] = value;
+      }
+    }
+  }
+  return result;
+}
+
 // Save or publish a question / study material
 export async function addMaterialToFirestore(material: StudyMaterial): Promise<void> {
-  const docRef = doc(db, 'materials', material.id);
-  await setDoc(docRef, material);
+  try {
+    const docRef = doc(db, 'materials', material.id);
+    const sanitized = sanitizeForFirestore(material);
+    await setDoc(docRef, sanitized, { merge: true });
+  } catch (err) {
+    console.info('Firestore material save notice:', err);
+  }
 }
 
 // Delete question / study material (mistakenly sent or unwanted)
 export async function deleteMaterialFromFirestore(materialId: string): Promise<void> {
-  const docRef = doc(db, 'materials', materialId);
-  await deleteDoc(docRef);
+  try {
+    const docRef = doc(db, 'materials', materialId);
+    await deleteDoc(docRef);
+  } catch (err) {
+    console.info('Firestore material delete notice:', err);
+  }
 }
 
 // Subscribe to solutions
@@ -298,7 +322,7 @@ export function subscribeToFirestoreSolutions(
       onData(items);
     },
     (err) => {
-      console.warn('Firestore solutions subscription warning:', err);
+      console.info('Firestore solutions subscription notice:', err);
       if (onError) onError(err);
     }
   );
@@ -306,8 +330,13 @@ export function subscribeToFirestoreSolutions(
 
 // Save or publish a student solution
 export async function addSolutionToFirestore(solution: Solution): Promise<void> {
-  const docRef = doc(db, 'solutions', solution.id);
-  await setDoc(docRef, solution);
+  try {
+    const docRef = doc(db, 'solutions', solution.id);
+    const sanitized = sanitizeForFirestore(solution);
+    await setDoc(docRef, sanitized, { merge: true });
+  } catch (err) {
+    console.info('Firestore solution save notice:', err);
+  }
 }
 
 // Direct fetch of solutions from Firestore (anti-spoofing cloud verification)
@@ -335,8 +364,12 @@ export async function fetchUsersDirectlyFromFirestore(): Promise<UserProfile[]> 
 
 // Delete solution
 export async function deleteSolutionFromFirestore(solutionId: string): Promise<void> {
-  const docRef = doc(db, 'solutions', solutionId);
-  await deleteDoc(docRef);
+  try {
+    const docRef = doc(db, 'solutions', solutionId);
+    await deleteDoc(docRef);
+  } catch (err) {
+    console.info('Firestore solution delete notice:', err);
+  }
 }
 
 // Subscribe to study groups
@@ -359,7 +392,7 @@ export function subscribeToFirestoreGroups(
       onData(items);
     },
     (err) => {
-      console.warn('Firestore groups subscription warning:', err);
+      console.info('Firestore groups subscription notice:', err);
       if (onError) onError(err);
     }
   );
@@ -367,13 +400,22 @@ export function subscribeToFirestoreGroups(
 
 // Save or create a study group
 export async function addGroupToFirestore(group: StudyGroup): Promise<void> {
-  const docRef = doc(db, 'study_groups', group.id);
-  await setDoc(docRef, group);
+  try {
+    const docRef = doc(db, 'study_groups', group.id);
+    const sanitized = sanitizeForFirestore(group);
+    await setDoc(docRef, sanitized, { merge: true });
+  } catch (err) {
+    console.info('Firestore group save notice:', err);
+  }
 }
 
 // Delete study group from Firestore
 export async function deleteGroupFromFirestore(groupId: string): Promise<void> {
-  const docRef = doc(db, 'study_groups', groupId);
-  await deleteDoc(docRef);
+  try {
+    const docRef = doc(db, 'study_groups', groupId);
+    await deleteDoc(docRef);
+  } catch (err) {
+    console.info('Firestore group delete notice:', err);
+  }
 }
 

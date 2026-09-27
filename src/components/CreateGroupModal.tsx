@@ -92,10 +92,10 @@ export default function CreateGroupModal({
     const finalGroupId = `grp-${Date.now()}`;
     const finalSecretCode = privacy === 'private' 
       ? (secretCode.trim().toUpperCase() || generateSecretCode(finalSubject))
-      : undefined;
+      : '';
     const finalInviteToken = privacy === 'private'
       ? (inviteToken || generateInviteToken())
-      : undefined;
+      : '';
 
     const newGroup: StudyGroup = {
       id: finalGroupId,
@@ -107,14 +107,14 @@ export default function CreateGroupModal({
       badgeEmoji,
       accentColor: privacy === 'private' ? '#8b5cf6' : '#3b82f6',
       isJoined: true,
-      meetingFrequency,
+      meetingFrequency: meetingFrequency || 'Flexible weekly sessions',
       leaderName: currentUser.name || 'Peer Mentor',
       createdByUid: currentUid,
       createdAt: 'Just now',
       privacy,
       secretCode: finalSecretCode,
       inviteToken: finalInviteToken,
-      memberUids: [currentUid],
+      memberUids: currentUid ? [currentUid] : [],
     };
 
     onAddGroup(newGroup);

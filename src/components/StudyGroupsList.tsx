@@ -67,18 +67,19 @@ export default function StudyGroupsList({
   );
 
   const isUserMember = (group: StudyGroup): boolean => {
-    if (group.isJoined) return true;
-    if (currentUser.joinedGroupIds?.includes(group.id)) return true;
     const currentUid = currentUser.authUid || currentUser.id;
-    if (group.createdByUid && group.createdByUid === currentUid) return true;
-    if (group.memberUids?.includes(currentUid)) return true;
+    if (currentUser.joinedGroupIds?.includes(group.id)) return true;
+    if (currentUid && currentUid !== 'guest') {
+      if (group.createdByUid === currentUid) return true;
+      if (group.memberUids?.includes(currentUid)) return true;
+    }
     return false;
   };
 
   // Filter groups:
   // 1. Subject filter
-  // 2. Public groups are visible to anyone who has logged in into the website
-  // 3. Private groups are visible to their members (peoples are added via secret code or invitation link)
+  // 2. Public groups are visible to ALL accounts, users, and peers on the platform
+  // 3. Private groups are visible to their members (peoples added via secret code or invitation link)
   const filteredGroups = groups.filter((g) => {
     if (selectedSubject !== 'All' && g.subject !== selectedSubject) {
       return false;
@@ -87,16 +88,12 @@ export default function StudyGroupsList({
     const isPrivate = g.privacy === 'private';
     const isMember = isUserMember(g);
 
-    // If not logged in, public groups are not visible
-    if (!isLoggedIn) {
-      return false;
-    }
-
     // In private groups, only members who have been added through code or link can see them
     if (isPrivate && !isMember) {
       return false;
     }
 
+    // Public groups are discoverable and open to all accounts and peers
     return true;
   });
 
