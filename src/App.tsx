@@ -402,11 +402,27 @@ export default function App() {
     ];
 
     // 1. Initial load from shared server backend
+    const mergeIncomingGroups = (incoming: StudyGroup[]) => {
+      if (!Array.isArray(incoming) || incoming.length === 0) return;
+      const valid = incoming.filter((g) => g && !LEGACY_DUMMY_GROUP_IDS.includes(g.id));
+      if (valid.length === 0) return;
+      setGroups((prev) => {
+        const map = new Map<string, StudyGroup>();
+        prev.forEach((g) => map.set(g.id, g));
+        valid.forEach((g) => {
+          const existing = map.get(g.id);
+          map.set(g.id, { ...(existing || {}), ...g });
+        });
+        const merged = Array.from(map.values());
+        if (JSON.stringify(prev) !== JSON.stringify(merged)) {
+          return merged;
+        }
+        return prev;
+      });
+    };
+
     fetchSharedGroupsFromApi().then((serverGroups) => {
-      if (serverGroups && Array.isArray(serverGroups)) {
-        const valid = serverGroups.filter((g) => !LEGACY_DUMMY_GROUP_IDS.includes(g.id));
-        setGroups(valid);
-      }
+      mergeIncomingGroups(serverGroups);
     });
 
     fetchSharedMaterialsFromApi().then((serverMats) => {
@@ -421,18 +437,10 @@ export default function App() {
       }
     });
 
-    // 2. Light fallback refresh on window focus or 30s interval (real-time is driven by Firestore listeners)
+    // 2. Continuous real-time server synchronization across accounts
     const refreshFromServer = () => {
       fetchSharedGroupsFromApi().then((serverGroups) => {
-        if (serverGroups && Array.isArray(serverGroups)) {
-          const valid = serverGroups.filter((g) => !LEGACY_DUMMY_GROUP_IDS.includes(g.id));
-          setGroups((prev) => {
-            if (JSON.stringify(prev) !== JSON.stringify(valid)) {
-              return valid;
-            }
-            return prev;
-          });
-        }
+        mergeIncomingGroups(serverGroups);
       }).catch(() => {});
 
       fetchSharedMaterialsFromApi().then((serverMats) => {
@@ -459,18 +467,17 @@ export default function App() {
     };
 
     window.addEventListener('focus', refreshFromServer);
-    const syncInterval = setInterval(refreshFromServer, 30000);
+    const syncInterval = setInterval(refreshFromServer, 4000);
 
     const unsubGroups = subscribeToFirestoreGroups((liveGroups) => {
-      if (liveGroups && Array.isArray(liveGroups)) {
+      if (liveGroups && Array.isArray(liveGroups) && liveGroups.length > 0) {
         // Automatically delete any lingering legacy dummy groups if found in Firestore
         liveGroups.forEach((g) => {
           if (LEGACY_DUMMY_GROUP_IDS.includes(g.id)) {
             deleteGroupFromFirestore(g.id).catch(() => {});
           }
         });
-        const valid = liveGroups.filter((g) => !LEGACY_DUMMY_GROUP_IDS.includes(g.id));
-        setGroups(valid);
+        mergeIncomingGroups(liveGroups);
       }
     });
 
@@ -893,9 +900,13 @@ export default function App() {
       memberUids: updatedMemberUids,
     };
 
-    setGroups((prev) =>
-      prev.map((g) => (g.id === targetGroup.id ? updatedGroup : g))
-    );
+    setGroups((prev) => {
+      const exists = prev.some((g) => g.id === targetGroup.id);
+      if (exists) {
+        return prev.map((g) => (g.id === targetGroup.id ? updatedGroup : g));
+      }
+      return [updatedGroup, ...prev];
+    });
 
     const updatedUser: UserProfile = {
       ...user,
@@ -905,6 +916,9 @@ export default function App() {
     saveStoredUser(updatedUser);
 
     saveSharedGroupToApi(updatedGroup).catch(() => {});
+    if (currentUid && currentUid !== 'guest') {
+      toggleJoinSharedGroupInApi(targetGroup.id, currentUid, true).catch(() => {});
+    }
     addGroupToFirestore(updatedGroup).catch(() => {});
     syncUserProfileToFirestore(updatedUser).catch(() => {});
     setSelectedGroupId(targetGroup.id);

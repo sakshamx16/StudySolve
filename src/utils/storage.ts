@@ -225,6 +225,29 @@ export async function fetchSharedGroupsFromApi(): Promise<StudyGroup[]> {
   return getStoredGroups();
 }
 
+export async function lookupSharedGroupFromApi(
+  code?: string,
+  token?: string,
+  groupId?: string
+): Promise<StudyGroup | null> {
+  try {
+    const params = new URLSearchParams();
+    if (code) params.set('code', code);
+    if (token) params.set('token', token);
+    if (groupId) params.set('groupId', groupId);
+    const res = await fetch(`/api/groups/lookup?${params.toString()}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.success && data.group) {
+        return data.group as StudyGroup;
+      }
+    }
+  } catch {
+    // Graceful silent fallback
+  }
+  return null;
+}
+
 export async function saveSharedGroupToApi(group: StudyGroup): Promise<void> {
   try {
     await fetch('/api/groups', {

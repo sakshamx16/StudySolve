@@ -1,1 +1,65 @@
-[]
+[
+  {
+    "id": "grp-private-audit-squad",
+    "name": "Audit Masters Private Circle",
+    "subject": "Auditing & Assurance",
+    "description": "Private study circle for internal audit standards.",
+    "memberCount": 1,
+    "materialsCount": 0,
+    "badgeEmoji": "🔍",
+    "accentColor": "#8b5cf6",
+    "isJoined": true,
+    "meetingFrequency": "Weekends",
+    "leaderName": "Saksham",
+    "createdByUid": "user_saksham",
+    "createdAt": "Just now",
+    "privacy": "private",
+    "secretCode": "ACCT-8492",
+    "inviteToken": "inv_test99",
+    "memberUids": [
+      "user_saksham"
+    ]
+  },
+  {
+    "id": "grp-public-ca-inter",
+    "name": "CA Inter Tax Study Circle",
+    "subject": "Taxation & GST",
+    "description": "Public peer group for taxation case studies and amendments.",
+    "memberCount": 1,
+    "materialsCount": 0,
+    "badgeEmoji": "⚖️",
+    "accentColor": "#3b82f6",
+    "isJoined": true,
+    "meetingFrequency": "MWF 6 PM",
+    "leaderName": "Rohan Sharma",
+    "createdByUid": "user_rohan",
+    "createdAt": "Just now",
+    "privacy": "public",
+    "secretCode": "",
+    "inviteToken": "",
+    "memberUids": [
+      "user_rohan"
+    ]
+  },
+  {
+    "id": "grp-test-1",
+    "name": "CA Final Audit Group",
+    "subject": "Auditing & Assurance",
+    "description": "Public audit study group",
+    "memberCount": 1,
+    "materialsCount": 0,
+    "badgeEmoji": "🔍",
+    "accentColor": "#3b82f6",
+    "isJoined": true,
+    "meetingFrequency": "Daily",
+    "leaderName": "Leader 1",
+    "createdByUid": "user_1",
+    "createdAt": "Just now",
+    "privacy": "public",
+    "secretCode": "",
+    "inviteToken": "",
+    "memberUids": [
+      "user_1"
+    ]
+  }
+]

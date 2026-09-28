@@ -62,6 +62,51 @@ app.get("/api/groups", (_req, res) => {
   res.json({ groups });
 });
 
+// GET /api/groups/lookup - Lookup private study group by secret code, invite token, or ID
+app.get("/api/groups/lookup", (req, res) => {
+  try {
+    const rawCode = ((req.query.code as string) || "").trim().toUpperCase();
+    const rawToken = ((req.query.token as string) || "").trim();
+    const rawGroupId = ((req.query.groupId as string) || "").trim();
+
+    if (!rawCode && !rawToken && !rawGroupId) {
+      return res.status(400).json({ error: "Missing code, token, or groupId" });
+    }
+
+    const cleanInputCode = rawCode.replace(/[^A-Z0-9]/g, "");
+    const groups = readJsonFile<any[]>(GROUPS_FILE, []);
+
+    const match = groups.find((g) => {
+      const gCode = (g.secretCode || "").trim().toUpperCase();
+      const cleanGCode = gCode.replace(/[^A-Z0-9]/g, "");
+
+      // 1. Direct or normalized match on secretCode (e.g. "ACCT-1234" or "acct1234")
+      if (rawCode && gCode && (gCode === rawCode || cleanGCode === cleanInputCode)) {
+        return true;
+      }
+      // 2. Direct match on inviteToken
+      if (rawToken && g.inviteToken && g.inviteToken.trim() === rawToken) {
+        return true;
+      }
+      // 3. Match on groupId + optional code
+      if (rawGroupId && g.id === rawGroupId) {
+        if (!gCode || !rawCode || gCode === rawCode || cleanGCode === cleanInputCode) {
+          return true;
+        }
+      }
+      return false;
+    });
+
+    if (!match) {
+      return res.status(404).json({ error: "No matching study group found" });
+    }
+
+    res.json({ success: true, group: match });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to lookup group" });
+  }
+});
+
 // POST /api/groups - Add or update a study group (immediately shared across all accounts)
 app.post("/api/groups", (req, res) => {
   try {

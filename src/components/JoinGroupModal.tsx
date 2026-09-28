@@ -10,11 +10,13 @@ import {
   Users, 
   ArrowRight,
   ShieldCheck,
-  Link as LinkIcon
+  Link as LinkIcon,
+  Loader2
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { StudyGroup, UserProfile } from '../types';
 import { parseInviteParams } from '../utils/groupCode';
+import { lookupSharedGroupFromApi } from '../utils/storage';
 
 interface JoinGroupModalProps {
   isOpen: boolean;
@@ -40,6 +42,8 @@ export default function JoinGroupModal({
   const [inputVal, setInputVal] = useState(initialCode);
   const [errorMsg, setErrorMsg] = useState('');
   const [successGroup, setSuccessGroup] = useState<StudyGroup | null>(null);
+  const [serverPreviewGroup, setServerPreviewGroup] = useState<StudyGroup | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Sync initial values
   useEffect(() => {
@@ -53,6 +57,8 @@ export default function JoinGroupModal({
     if (isOpen) {
       setErrorMsg('');
       setSuccessGroup(null);
+      setServerPreviewGroup(null);
+      setIsSubmitting(false);
       if (initialCode) {
         setInputVal(initialCode);
       }
@@ -83,23 +89,38 @@ export default function JoinGroupModal({
     };
   };
 
-  // Find candidate group matching the code, token, or ID
+  // Find candidate group matching the code, token, or ID (robust normalized matching)
   const findMatchingGroup = (raw: string): StudyGroup | null => {
     const { code, token, targetGroupId } = extractCodeOrToken(raw);
     if (!code && !token && !targetGroupId) return null;
 
+    const cleanInput = code.replace(/[^A-Z0-9]/g, '');
+    const cleanDigits = code.replace(/[^0-9]/g, '');
+
     return groups.find((g) => {
-      // 1. Direct match on secretCode
-      if (code && g.secretCode && g.secretCode.toUpperCase() === code) {
-        return true;
+      const gCode = (g.secretCode || '').toUpperCase().trim();
+      const cleanGCode = gCode.replace(/[^A-Z0-9]/g, '');
+      const cleanGDigits = gCode.replace(/[^0-9]/g, '');
+
+      // 1. Direct or normalized match on secretCode (e.g. "ACCT-7429", "acct-7429", "ACCT7429")
+      if (code && gCode) {
+        if (code === gCode || (cleanInput && cleanGCode && cleanInput === cleanGCode)) {
+          return true;
+        }
+        // Match 4-digit code if user only typed numbers
+        if (cleanDigits.length >= 4 && cleanDigits === cleanGDigits) {
+          return true;
+        }
       }
+
       // 2. Direct match on inviteToken
-      if (token && g.inviteToken && g.inviteToken === token) {
+      if (token && g.inviteToken && g.inviteToken.trim() === token.trim()) {
         return true;
       }
+
       // 3. Match on groupId + code
       if (targetGroupId && g.id === targetGroupId) {
-        if (!g.secretCode || (code && g.secretCode.toUpperCase() === code)) {
+        if (!g.secretCode || !code || code === gCode || cleanInput === cleanGCode) {
           return true;
         }
       }
@@ -107,7 +128,31 @@ export default function JoinGroupModal({
     }) || null;
   };
 
-  const previewGroup = inputVal.trim() ? findMatchingGroup(inputVal) : null;
+  const localPreview = inputVal.trim() ? findMatchingGroup(inputVal) : null;
+  const previewGroup = localPreview || serverPreviewGroup;
+
+  // Lightweight async lookup for preview when user finishes typing a valid code
+  useEffect(() => {
+    const trimmed = inputVal.trim();
+    if (!trimmed || localPreview) {
+      setServerPreviewGroup(null);
+      return;
+    }
+
+    const { code, token, targetGroupId } = extractCodeOrToken(trimmed);
+    if (code.length >= 4 || token.length >= 4 || targetGroupId) {
+      const timer = setTimeout(() => {
+        lookupSharedGroupFromApi(code, token, targetGroupId).then((res) => {
+          if (res) {
+            setServerPreviewGroup(res);
+            setErrorMsg('');
+          }
+        }).catch(() => {});
+      }, 350);
+      return () => clearTimeout(timer);
+    }
+  }, [inputVal, localPreview]);
+
   const isAlreadyMember = previewGroup ? (
     previewGroup.isJoined || 
     currentUser.joinedGroupIds.includes(previewGroup.id) ||
@@ -115,7 +160,7 @@ export default function JoinGroupModal({
     previewGroup.memberUids?.includes(currentUser.authUid || currentUser.id)
   ) : false;
 
-  const handleJoin = (e: React.FormEvent) => {
+  const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
 
@@ -126,13 +171,30 @@ export default function JoinGroupModal({
       return;
     }
 
-    const matched = findMatchingGroup(inputVal);
+    setIsSubmitting(true);
+    let matched = findMatchingGroup(inputVal) || serverPreviewGroup;
+
+    // If not found in local memory, lookup from shared server API
     if (!matched) {
+      const { code, token, targetGroupId } = extractCodeOrToken(inputVal);
+      try {
+        const serverMatched = await lookupSharedGroupFromApi(code, token, targetGroupId);
+        if (serverMatched) {
+          matched = serverMatched;
+        }
+      } catch {
+        // Fallback
+      }
+    }
+
+    if (!matched) {
+      setIsSubmitting(false);
       setErrorMsg('No private study group found matching this secret code or invite link. Please check with your study group leader.');
       return;
     }
 
     if (isAlreadyMember) {
+      setIsSubmitting(false);
       setSuccessGroup(matched);
       return;
     }
@@ -140,6 +202,7 @@ export default function JoinGroupModal({
     // Join group!
     onJoinGroup(matched);
     setSuccessGroup(matched);
+    setIsSubmitting(false);
 
     try {
       confetti({
@@ -320,16 +383,21 @@ export default function JoinGroupModal({
                 </button>
                 <button
                   type="submit"
-                  disabled={!inputVal.trim()}
+                  disabled={!inputVal.trim() || isSubmitting}
                   className={`px-5 py-2.5 rounded-xl text-white font-bold text-xs shadow-sm flex items-center gap-2 cursor-pointer transition-all ${
-                    !inputVal.trim()
+                    !inputVal.trim() || isSubmitting
                       ? 'bg-stone-300 cursor-not-allowed'
                       : isAlreadyMember
                       ? 'bg-stone-900 hover:bg-stone-800'
                       : 'bg-purple-600 hover:bg-purple-700 shadow-purple-500/20'
                   }`}
                 >
-                  {isAlreadyMember ? (
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Verifying Code...</span>
+                    </>
+                  ) : isAlreadyMember ? (
                     <>
                       <span>Open Study Circle</span>
                       <ArrowRight className="w-3.5 h-3.5" />

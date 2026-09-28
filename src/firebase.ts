@@ -382,14 +382,15 @@ export function subscribeToFirestoreGroups(
     colRef,
     (snapshot) => {
       if (snapshot.empty) {
-        onData([]);
         return;
       }
       const items: StudyGroup[] = [];
       snapshot.forEach((d) => {
         items.push({ id: d.id, ...d.data() } as StudyGroup);
       });
-      onData(items);
+      if (items.length > 0) {
+        onData(items);
+      }
     },
     (err) => {
       console.info('Firestore groups subscription notice:', err);
