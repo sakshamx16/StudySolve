@@ -4,7 +4,7 @@
     "name": "Audit Masters Private Circle",
     "subject": "Auditing & Assurance",
     "description": "Private study circle for internal audit standards.",
-    "memberCount": 1,
+    "memberCount": 3,
     "materialsCount": 0,
     "badgeEmoji": "🔍",
     "accentColor": "#8b5cf6",
@@ -17,7 +17,9 @@
     "secretCode": "ACCT-8492",
     "inviteToken": "inv_test99",
     "memberUids": [
-      "user_saksham"
+      "user_saksham",
+      "user_student_2",
+      "test_member_3"
     ]
   },
   {

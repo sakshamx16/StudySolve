@@ -5,6 +5,38 @@ const GROUPS_STORAGE_KEY = 'studysolve_v2_groups';
 const MATERIALS_STORAGE_KEY = 'studysolve_v2_materials';
 const SOLUTIONS_STORAGE_KEY = 'studysolve_v2_solutions';
 const USER_STORAGE_KEY = 'studysolve_v2_user';
+const JOINED_GROUPS_STORAGE_KEY = 'studysolve_joined_group_ids';
+
+export function getStoredJoinedGroupIds(): string[] {
+  try {
+    const raw = localStorage.getItem(JOINED_GROUPS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
+export function saveStoredJoinedGroupIds(ids: string[]): void {
+  try {
+    localStorage.setItem(JOINED_GROUPS_STORAGE_KEY, JSON.stringify(Array.from(new Set(ids))));
+  } catch {}
+}
+
+export function addStoredJoinedGroupId(groupId: string): void {
+  if (!groupId) return;
+  const current = getStoredJoinedGroupIds();
+  if (!current.includes(groupId)) {
+    saveStoredJoinedGroupIds([...current, groupId]);
+  }
+}
+
+export function removeStoredJoinedGroupId(groupId: string): void {
+  if (!groupId) return;
+  const current = getStoredJoinedGroupIds();
+  saveStoredJoinedGroupIds(current.filter((id) => id !== groupId));
+}
 
 const LEGACY_DUMMY_GROUP_IDS = [
   'grp-accounting',
@@ -164,7 +196,7 @@ export function getStoredUser(accountKey?: string): UserProfile {
 
 export function saveStoredUser(user: UserProfile): void {
   try {
-    if (!user || !user.name || user.id === 'guest') {
+    if (!user || !user.name) {
       return;
     }
 
@@ -216,7 +248,8 @@ export async function fetchSharedGroupsFromApi(): Promise<StudyGroup[]> {
     if (!res.ok) return getStoredGroups();
     const data = await res.json();
     if (Array.isArray(data.groups)) {
-      saveStoredGroups(data.groups);
+      // NOTE: Do not overwrite local storage directly with raw server groups,
+      // as mergeIncomingGroups preserves client-specific isJoined states and local memberships.
       return data.groups;
     }
   } catch {
@@ -278,17 +311,47 @@ export async function deleteSharedGroupFromApi(groupId: string, userId?: string)
 export async function toggleJoinSharedGroupInApi(
   groupId: string, 
   userId: string, 
-  isJoining: boolean
+  isJoining: boolean,
+  userIds?: string[]
 ): Promise<StudyGroup | null> {
   try {
     const res = await fetch(`/api/groups/${groupId}/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, isJoining }),
+      body: JSON.stringify({ userId, isJoining, userIds }),
     });
     if (res.ok) {
       const data = await res.json();
       return data.group;
+    }
+  } catch {
+    // Silent catch
+  }
+  return null;
+}
+
+export async function saveUserProfileToApi(profile: UserProfile): Promise<void> {
+  try {
+    if (!profile || (!profile.id && !profile.authUid)) return;
+    await fetch('/api/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile }),
+    });
+  } catch {
+    // Silent catch
+  }
+}
+
+export async function fetchUserProfileFromApi(uid: string): Promise<UserProfile | null> {
+  try {
+    if (!uid || uid === 'guest') return null;
+    const res = await fetch(`/api/users/${uid}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.success && data.profile) {
+        return data.profile;
+      }
     }
   } catch {
     // Silent catch

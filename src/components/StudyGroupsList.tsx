@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { 
   Users, 
   BookOpen, 
@@ -11,9 +11,12 @@ import {
   Key,
   LogIn,
   LogOut,
-  Crown
+  Crown,
+  Globe,
+  Sparkles
 } from 'lucide-react';
 import { StudyGroup, Subject, UserProfile } from '../types';
+import { getStoredJoinedGroupIds } from '../utils/storage';
 
 interface StudyGroupsListProps {
   groups: StudyGroup[];
@@ -26,6 +29,8 @@ interface StudyGroupsListProps {
   onOpenAuthModal?: () => void;
   onOpenJoinCodeModal?: (targetGroupId?: string, code?: string) => void;
   onOpenInviteModal?: (group: StudyGroup) => void;
+  selectedGroupId?: string | null;
+  onSelectGroup?: (groupId: string | null) => void;
 }
 
 const subjects: (Subject | 'All')[] = [
@@ -51,15 +56,18 @@ export default function StudyGroupsList({
   onOpenAuthModal,
   onOpenJoinCodeModal,
   onOpenInviteModal,
+  selectedGroupId,
+  onSelectGroup,
 }: StudyGroupsListProps) {
   const [selectedSubject, setSelectedSubject] = useState<Subject | 'All'>('All');
+  const [selectedCategory, setSelectedCategory] = useState<'all' | 'my-groups' | 'public' | 'private'>('all');
   const [groupToDelete, setGroupToDelete] = useState<StudyGroup | null>(null);
   const [groupToLeave, setGroupToLeave] = useState<StudyGroup | null>(null);
 
   const isLoggedIn = Boolean(
     currentUser.name && 
-    currentUser.id !== 'guest' && 
-    !currentUser.isAnonymous
+    currentUser.name.trim().length > 0 &&
+    currentUser.id !== 'guest'
   );
 
   const allSubjects = Array.from(
@@ -71,44 +79,82 @@ export default function StudyGroupsList({
 
   const isGroupCreator = (group: StudyGroup): boolean => {
     const currentUid = currentUser.authUid || currentUser.id;
-    if (!currentUid || currentUid === 'guest') return false;
+    if (!currentUid) return false;
     if (!group.createdByUid) return false;
     return (
       group.createdByUid === currentUid ||
-      Boolean(currentUser.authUid && group.createdByUid === currentUser.authUid)
+      Boolean(currentUser.authUid && group.createdByUid === currentUser.authUid) ||
+      Boolean(currentUser.id && group.createdByUid === currentUser.id) ||
+      Boolean(currentUser.name && group.leaderName && currentUser.name.toLowerCase().trim() === group.leaderName.toLowerCase().trim())
     );
   };
 
   const isUserMember = (group: StudyGroup): boolean => {
-    const currentUid = currentUser.authUid || currentUser.id;
+    // 1. Explicit joined flag
+    if (group.isJoined) return true;
+    // 2. Group creator is always a member
     if (isGroupCreator(group)) return true;
-    if (currentUser.joinedGroupIds?.includes(group.id)) return true;
-    if (currentUid && currentUid !== 'guest') {
-      if (group.memberUids?.includes(currentUid)) return true;
+    // 3. User's joinedGroupIds profile array
+    if (currentUser.joinedGroupIds && currentUser.joinedGroupIds.includes(group.id)) return true;
+    // 4. Dedicated persistent joined groups storage
+    const storedJoined = getStoredJoinedGroupIds();
+    if (storedJoined.includes(group.id)) return true;
+    // 5. Member UID matching (against authUid, id, and email)
+    const uidsToCheck = [currentUser.authUid, currentUser.id, currentUser.email].filter(Boolean) as string[];
+    if (group.memberUids && group.memberUids.length > 0) {
+      if (uidsToCheck.some((uid) => group.memberUids?.includes(uid))) {
+        return true;
+      }
     }
     return false;
   };
 
+  // Counts for filter pills
+  const myGroupsCount = useMemo(() => {
+    return groups.filter((g) => isUserMember(g)).length;
+  }, [groups, currentUser]);
+
+  const publicGroupsCount = useMemo(() => {
+    return groups.filter((g) => g.privacy !== 'private').length;
+  }, [groups]);
+
+  const privateGroupsCount = useMemo(() => {
+    return groups.filter((g) => g.privacy === 'private' && isUserMember(g)).length;
+  }, [groups, currentUser]);
+
   // Filter groups:
-  // 1. Subject filter
-  // 2. Public groups are visible to ALL accounts, users, and peers on the platform
-  // 3. Private groups are visible to their members (peoples added via secret code or invitation link)
-  const filteredGroups = groups.filter((g) => {
-    if (selectedSubject !== 'All' && g.subject !== selectedSubject) {
-      return false;
-    }
+  // 1. Privacy protection: private groups are visible only to members (creator or joined via code/link)
+  // 2. Category filter (All | My Circles | Public | Private Circles)
+  // 3. Subject filter
+  const filteredGroups = useMemo(() => {
+    return groups.filter((g) => {
+      const isPrivate = g.privacy === 'private';
+      const isMember = isUserMember(g);
 
-    const isPrivate = g.privacy === 'private';
-    const isMember = isUserMember(g);
+      // Private groups are strictly visible only to their members
+      if (isPrivate && !isMember) {
+        return false;
+      }
 
-    // In private groups, only members who have been added through code or link can see them
-    if (isPrivate && !isMember) {
-      return false;
-    }
+      // Category filter
+      if (selectedCategory === 'my-groups' && !isMember) {
+        return false;
+      }
+      if (selectedCategory === 'public' && isPrivate) {
+        return false;
+      }
+      if (selectedCategory === 'private' && !isPrivate) {
+        return false;
+      }
 
-    // Public groups are discoverable and open to all accounts and peers
-    return true;
-  });
+      // Subject filter
+      if (selectedSubject !== 'All' && g.subject !== selectedSubject) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [groups, selectedCategory, selectedSubject, currentUser]);
 
   return (
     <div className="space-y-6">
@@ -145,6 +191,77 @@ export default function StudyGroupsList({
         </div>
       </div>
 
+      {/* Category Filter Pills: All Study Groups | My Circles (Joined & Led) | Public Groups | Private Circles */}
+      <div className="flex items-center gap-2 flex-wrap border-b border-stone-200/80 dark:border-stone-800 pb-3">
+        <button
+          onClick={() => setSelectedCategory('all')}
+          className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+            selectedCategory === 'all'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-700'
+          }`}
+        >
+          <span>All Study Groups</span>
+          <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+            selectedCategory === 'all' ? 'bg-blue-700 text-white' : 'bg-stone-200 dark:bg-stone-700 text-stone-700 dark:text-stone-300'
+          }`}>
+            {groups.length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setSelectedCategory('my-groups')}
+          className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+            selectedCategory === 'my-groups'
+              ? 'bg-purple-600 text-white shadow-xs'
+              : 'bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/60 hover:bg-purple-100 dark:hover:bg-purple-900/60'
+          }`}
+          title="Study circles you have joined or created"
+        >
+          <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+          <span>My Study Circles</span>
+          <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+            selectedCategory === 'my-groups' ? 'bg-purple-700 text-white' : 'bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-300'
+          }`}>
+            {myGroupsCount}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setSelectedCategory('public')}
+          className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+            selectedCategory === 'public'
+              ? 'bg-emerald-600 text-white shadow-xs'
+              : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60'
+          }`}
+        >
+          <Globe className="w-3.5 h-3.5 text-emerald-500" />
+          <span>Public Groups</span>
+          <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+            selectedCategory === 'public' ? 'bg-emerald-700 text-white' : 'bg-emerald-100 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-300'
+          }`}>
+            {publicGroupsCount}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setSelectedCategory('private')}
+          className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+            selectedCategory === 'private'
+              ? 'bg-purple-600 text-white shadow-xs'
+              : 'bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-700'
+          }`}
+        >
+          <Lock className="w-3.5 h-3.5 text-purple-500" />
+          <span>Private Circles</span>
+          <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+            selectedCategory === 'private' ? 'bg-purple-700 text-white' : 'bg-stone-200 dark:bg-stone-700 text-stone-700 dark:text-stone-300'
+          }`}>
+            {privateGroupsCount}
+          </span>
+        </button>
+      </div>
+
       {/* Subject filter chips */}
       <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
         {allSubjects.map((sub) => (
@@ -153,8 +270,8 @@ export default function StudyGroupsList({
             onClick={() => setSelectedSubject(sub)}
             className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${
               selectedSubject === sub
-                ? 'bg-stone-900 text-white font-semibold'
-                : 'bg-white text-stone-600 hover:bg-stone-100 border border-stone-200'
+                ? 'bg-stone-900 dark:bg-white text-white dark:text-stone-900 font-semibold'
+                : 'bg-white dark:bg-stone-900 text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 border border-stone-200 dark:border-stone-800'
             }`}
           >
             {sub === 'All' ? 'All Subjects' : sub}
@@ -169,7 +286,33 @@ export default function StudyGroupsList({
             <Users className="w-7 h-7" />
           </div>
 
-          {!isLoggedIn ? (
+          {selectedCategory === 'my-groups' ? (
+            <>
+              <h3 className="text-lg font-bold text-stone-900 dark:text-stone-100">
+                No Joined Study Circles Yet
+              </h3>
+              <p className="text-xs sm:text-sm text-stone-500 dark:text-stone-400 mt-1.5 mb-6 max-w-sm mx-auto leading-relaxed">
+                You haven't joined or created any study circles yet. You can join a private group using a secret access code or join any of the open public groups.
+              </p>
+              <div className="flex flex-wrap justify-center gap-2.5">
+                {onOpenJoinCodeModal && (
+                  <button
+                    onClick={() => onOpenJoinCodeModal()}
+                    className="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold transition-colors flex items-center gap-2 shadow-xs cursor-pointer"
+                  >
+                    <Key className="w-4 h-4" />
+                    <span>Join with Secret Code</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => setSelectedCategory('all')}
+                  className="px-4 py-2.5 rounded-xl border border-stone-300 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-800 text-stone-700 dark:text-stone-200 text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  Browse All Groups
+                </button>
+              </div>
+            </>
+          ) : !isLoggedIn ? (
             <>
               <h3 className="text-lg font-bold text-stone-900 dark:text-stone-100">
                 Log in to view public study groups
@@ -201,14 +344,23 @@ export default function StudyGroupsList({
           ) : (
             <>
               <h3 className="text-lg font-bold text-stone-900 dark:text-stone-100">
-                {groups.length === 0 ? 'No study groups yet' : 'No groups found for this subject'}
+                {groups.length === 0 ? 'No study groups yet' : 'No groups found for this filter'}
               </h3>
               <p className="text-xs sm:text-sm text-stone-500 dark:text-stone-400 mt-1.5 mb-6 max-w-sm mx-auto leading-relaxed">
                 {groups.length === 0
                   ? 'Be the first to start a peer study group! Form a study circle for your subject, invite classmates, and collaborate on problem solving.'
-                  : 'Try choosing "All Subjects" or create a new dedicated group for this subject.'}
+                  : 'Try choosing "All Subjects" or reset your category filter to see available groups.'}
               </p>
               <div className="flex flex-wrap justify-center gap-2.5">
+                <button
+                  onClick={() => {
+                    setSelectedSubject('All');
+                    setSelectedCategory('all');
+                  }}
+                  className="px-4 py-2.5 rounded-xl border border-stone-300 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-800 text-stone-700 dark:text-stone-200 text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  Reset Filters
+                </button>
                 <button
                   onClick={onOpenCreateGroupModal}
                   className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors flex items-center gap-2 shadow-xs cursor-pointer"
@@ -235,11 +387,17 @@ export default function StudyGroupsList({
             const isPrivate = group.privacy === 'private';
             const isCreator = isGroupCreator(group);
             const isMember = isUserMember(group);
+            const isSelected = selectedGroupId === group.id;
 
             return (
               <div
                 key={group.id}
-                className="bg-white dark:bg-stone-900 rounded-2xl border border-stone-200 dark:border-stone-800 hover:border-blue-300 dark:hover:border-blue-600 shadow-2xs hover:shadow-md transition-all p-5 flex flex-col justify-between group/card"
+                id={`group-card-${group.id}`}
+                className={`bg-white dark:bg-stone-900 rounded-2xl border ${
+                  isSelected
+                    ? 'border-blue-500 ring-2 ring-blue-500/30 dark:ring-blue-500/40 shadow-md'
+                    : 'border-stone-200 dark:border-stone-800 hover:border-blue-300 dark:hover:border-blue-600 shadow-2xs hover:shadow-md'
+                } transition-all p-5 flex flex-col justify-between group/card`}
               >
                 <div>
                   <div className="flex items-start justify-between gap-2 mb-3">
@@ -266,10 +424,20 @@ export default function StudyGroupsList({
                             <Users className="w-2.5 h-2.5 text-stone-500 dark:text-stone-400" />
                             <span>{group.memberCount} {group.memberCount === 1 ? 'Member' : 'Members'}</span>
                           </span>
-                          {isCreator && (
+                          {isCreator ? (
                             <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 px-2 py-0.5 rounded flex items-center gap-1">
                               <Crown className="w-2.5 h-2.5 text-amber-500" />
-                              <span>Creator</span>
+                              <span>Host</span>
+                            </span>
+                          ) : isMember ? (
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 px-2 py-0.5 rounded flex items-center gap-1">
+                              <Check className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400" />
+                              <span>Joined</span>
+                            </span>
+                          ) : null}
+                          {isSelected && (
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 px-2 py-0.5 rounded">
+                              Active
                             </span>
                           )}
                         </div>

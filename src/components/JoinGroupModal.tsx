@@ -16,7 +16,7 @@ import {
 import confetti from 'canvas-confetti';
 import { StudyGroup, UserProfile } from '../types';
 import { parseInviteParams } from '../utils/groupCode';
-import { lookupSharedGroupFromApi } from '../utils/storage';
+import { lookupSharedGroupFromApi, addStoredJoinedGroupId } from '../utils/storage';
 
 interface JoinGroupModalProps {
   isOpen: boolean;
@@ -27,6 +27,7 @@ interface JoinGroupModalProps {
   initialCode?: string;
   initialGroupId?: string;
   onOpenAuthModal?: () => void;
+  onNavigateToGroup?: (groupId: string) => void;
 }
 
 export default function JoinGroupModal({
@@ -38,6 +39,7 @@ export default function JoinGroupModal({
   initialCode = '',
   initialGroupId = '',
   onOpenAuthModal,
+  onNavigateToGroup,
 }: JoinGroupModalProps) {
   const [inputVal, setInputVal] = useState(initialCode);
   const [errorMsg, setErrorMsg] = useState('');
@@ -67,8 +69,8 @@ export default function JoinGroupModal({
 
   const isLoggedIn = Boolean(
     currentUser.name && 
-    currentUser.id !== 'guest' && 
-    !currentUser.isAnonymous
+    currentUser.name.trim().length > 0 &&
+    currentUser.id !== 'guest'
   );
 
   // Extract clean code or token if user pasted a full URL
@@ -155,9 +157,11 @@ export default function JoinGroupModal({
 
   const isAlreadyMember = previewGroup ? (
     previewGroup.isJoined || 
-    currentUser.joinedGroupIds.includes(previewGroup.id) ||
+    (currentUser.joinedGroupIds && currentUser.joinedGroupIds.includes(previewGroup.id)) ||
     previewGroup.createdByUid === (currentUser.authUid || currentUser.id) ||
-    previewGroup.memberUids?.includes(currentUser.authUid || currentUser.id)
+    Boolean(currentUser.authUid && previewGroup.memberUids?.includes(currentUser.authUid)) ||
+    Boolean(currentUser.id && previewGroup.memberUids?.includes(currentUser.id)) ||
+    Boolean(currentUser.email && previewGroup.memberUids?.includes(currentUser.email))
   ) : false;
 
   const handleJoin = async (e: React.FormEvent) => {
@@ -194,12 +198,14 @@ export default function JoinGroupModal({
     }
 
     if (isAlreadyMember) {
+      addStoredJoinedGroupId(matched.id);
       setIsSubmitting(false);
       setSuccessGroup(matched);
       return;
     }
 
     // Join group!
+    addStoredJoinedGroupId(matched.id);
     onJoinGroup(matched);
     setSuccessGroup(matched);
     setIsSubmitting(false);
@@ -295,10 +301,15 @@ export default function JoinGroupModal({
 
               <button
                 type="button"
-                onClick={onClose}
+                onClick={() => {
+                  if (onNavigateToGroup && successGroup) {
+                    onNavigateToGroup(successGroup.id);
+                  }
+                  onClose();
+                }}
                 className="w-full py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-colors"
               >
-                <span>Enter Study Circle</span>
+                <span>Enter Study Circle in Dashboard</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>

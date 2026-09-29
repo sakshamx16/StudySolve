@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Plus, 
   Search, 
@@ -16,7 +16,8 @@ import {
   Key,
   LogOut,
   Lock,
-  Globe
+  Globe,
+  ArrowRight
 } from 'lucide-react';
 import { initialGroups, GUEST_USER } from './data/initialData';
 import { 
@@ -49,7 +50,12 @@ import {
   deleteSharedMaterialFromApi,
   fetchSharedSolutionsFromApi,
   saveSharedSolutionToApi,
-  deleteSharedSolutionFromApi
+  deleteSharedSolutionFromApi,
+  getStoredJoinedGroupIds,
+  addStoredJoinedGroupId,
+  removeStoredJoinedGroupId,
+  saveUserProfileToApi,
+  fetchUserProfileFromApi
 } from './utils/storage';
 import { getStudentAvatar } from './utils/avatar';
 import { ThemeMode, getInitialTheme, applyTheme, saveThemePreference } from './utils/theme';
@@ -95,6 +101,16 @@ export default function App() {
   const [materials, setMaterials] = useState<StudyMaterial[]>(getStoredMaterials);
   const [solutions, setSolutions] = useState<Solution[]>(getStoredSolutions);
   const [user, setUser] = useState<UserProfile>(getStoredUser);
+  const userRef = useRef<UserProfile>(user);
+
+  useEffect(() => {
+    userRef.current = user;
+    saveStoredUser(user);
+    // Keep joinedGroupIds storage in sync
+    if (user.joinedGroupIds && user.joinedGroupIds.length > 0) {
+      user.joinedGroupIds.forEach((id) => addStoredJoinedGroupId(id));
+    }
+  }, [user]);
 
   // Sync with localStorage
   useEffect(() => {
@@ -108,10 +124,6 @@ export default function App() {
   useEffect(() => {
     saveStoredSolutions(solutions);
   }, [solutions]);
-
-  useEffect(() => {
-    saveStoredUser(user);
-  }, [user]);
 
   // Navigation & Group filter with URL synchronization
   const getInitialTab = (): 'materials' | 'groups' | 'top-solutions' | 'leaderboard' => {
@@ -298,11 +310,18 @@ export default function App() {
               ? cloudProfile.bio
               : sessionUser.bio;
 
+            const resolvedJoinedGroupIds = Array.from(new Set([
+              ...(sessionUser.joinedGroupIds || []),
+              ...(Array.isArray(cloudProfile.joinedGroupIds) ? cloudProfile.joinedGroupIds : []),
+              ...getStoredJoinedGroupIds()
+            ]));
+
             const resolvedUser: UserProfile = {
               ...sessionUser,
               ...cloudProfile,
               id: uid,
               authUid: uid,
+              joinedGroupIds: resolvedJoinedGroupIds,
               name: resolvedName,
               avatar: resolvedAvatar,
               hasCustomAvatar: Boolean(cloudProfile.hasCustomAvatar || sessionUser.hasCustomAvatar),
@@ -316,9 +335,11 @@ export default function App() {
 
             setUser(resolvedUser);
             saveStoredUser(resolvedUser);
+            saveUserProfileToApi(resolvedUser).catch(() => {});
           } else {
             // No remote document yet or remote was empty: back up current session user (with any edits) to Firestore
             await syncUserProfileToFirestore(sessionUser).catch(() => {});
+            saveUserProfileToApi(sessionUser).catch(() => {});
           }
         } catch (err) {
           console.warn('Profile fetch notice:', err);
@@ -339,11 +360,18 @@ export default function App() {
                   ? liveProfile.avatar
                   : prev.avatar;
 
+                const liveJoinedGroupIds = Array.from(new Set([
+                  ...(prev.joinedGroupIds || []),
+                  ...(Array.isArray(liveProfile.joinedGroupIds) ? liveProfile.joinedGroupIds : []),
+                  ...getStoredJoinedGroupIds()
+                ]));
+
                 const merged: UserProfile = {
                   ...prev,
                   ...liveProfile,
                   id: uid,
                   authUid: uid,
+                  joinedGroupIds: liveJoinedGroupIds,
                   name: liveProfile.name || prev.name,
                   avatar: liveAvatar,
                   gradeLevel: liveProfile.gradeLevel || prev.gradeLevel,
@@ -352,6 +380,7 @@ export default function App() {
                   email: firebaseUser.email || liveProfile.email || prev.email,
                 };
                 saveStoredUser(merged);
+                saveUserProfileToApi(merged).catch(() => {});
                 return merged;
               });
             }
@@ -409,9 +438,51 @@ export default function App() {
       setGroups((prev) => {
         const map = new Map<string, StudyGroup>();
         prev.forEach((g) => map.set(g.id, g));
+        const currentUser = userRef.current;
+        const currentUid = currentUser.authUid || currentUser.id;
+        const storedJoinedIds = getStoredJoinedGroupIds();
+        const allUserJoinedIds = new Set([
+          ...(currentUser.joinedGroupIds || []),
+          ...storedJoinedIds
+        ]);
+
         valid.forEach((g) => {
           const existing = map.get(g.id);
-          map.set(g.id, { ...(existing || {}), ...g });
+          const isCreator = Boolean(
+            g.createdByUid && (
+              (currentUid && currentUid !== 'guest' && g.createdByUid === currentUid) ||
+              (currentUser.authUid && g.createdByUid === currentUser.authUid) ||
+              (currentUser.id && currentUser.id !== 'guest' && g.createdByUid === currentUser.id) ||
+              (currentUser.name && g.leaderName && currentUser.name.trim().toLowerCase() === g.leaderName.trim().toLowerCase())
+            )
+          );
+          const isUserJoinedLocally = Boolean(
+            existing?.isJoined ||
+            (existing?.memberUids && currentUid && currentUid !== 'guest' && existing.memberUids.includes(currentUid)) ||
+            allUserJoinedIds.has(g.id) ||
+            isCreator
+          );
+
+          const mergedMemberUids = Array.from(new Set([
+            ...(g.memberUids || []),
+            ...(existing?.memberUids || []),
+            ...(isUserJoinedLocally && currentUid && currentUid !== 'guest' ? [currentUid] : []),
+            ...(isUserJoinedLocally && currentUser.authUid ? [currentUser.authUid] : [])
+          ])).filter((u) => Boolean(u) && u !== 'guest');
+
+          const isNowMember = Boolean(
+            isUserJoinedLocally ||
+            (currentUid && currentUid !== 'guest' && mergedMemberUids.includes(currentUid)) ||
+            (currentUser.authUid && mergedMemberUids.includes(currentUser.authUid))
+          );
+
+          map.set(g.id, {
+            ...(existing || {}),
+            ...g,
+            isJoined: isNowMember || Boolean(g.isJoined),
+            memberUids: mergedMemberUids,
+            memberCount: Math.max(g.memberCount || 1, mergedMemberUids.length)
+          });
         });
         const merged = Array.from(map.values());
         if (JSON.stringify(prev) !== JSON.stringify(merged)) {
@@ -509,6 +580,30 @@ export default function App() {
     return Array.from(new Set([...fromMaterials, ...fromGroups])).filter(Boolean);
   }, [materials, groups]);
 
+  // Determine if current user is member of a study group
+  const isUserMemberOfGroup = (g: StudyGroup): boolean => {
+    if (g.isJoined) return true;
+    const currentUid = user.authUid || user.id;
+    if (g.createdByUid && (
+      (currentUid && currentUid !== 'guest' && g.createdByUid === currentUid) ||
+      (user.authUid && g.createdByUid === user.authUid) ||
+      (user.id && user.id !== 'guest' && g.createdByUid === user.id) ||
+      (user.name && g.leaderName && user.name.trim().toLowerCase() === g.leaderName.trim().toLowerCase())
+    )) return true;
+    if (user.joinedGroupIds && user.joinedGroupIds.includes(g.id)) return true;
+    const storedJoined = getStoredJoinedGroupIds();
+    if (storedJoined.includes(g.id)) return true;
+    const uidsToCheck = [user.authUid, user.id, user.email].filter(Boolean) as string[];
+    if (g.memberUids && g.memberUids.length > 0) {
+      if (uidsToCheck.some((uid) => g.memberUids?.includes(uid))) return true;
+    }
+    return false;
+  };
+
+  const myJoinedGroups = useMemo(() => {
+    return groups.filter(isUserMemberOfGroup);
+  }, [groups, user]);
+
   // Filtered & Sorted Study Materials
   const filteredMaterials = useMemo(() => {
     return materials
@@ -522,12 +617,7 @@ export default function App() {
         if (mat.groupId) {
           const parentGroup = groups.find((g) => g.id === mat.groupId);
           if (parentGroup && parentGroup.privacy === 'private') {
-            const currentUid = user.authUid || user.id;
-            const isMember = 
-              parentGroup.isJoined || 
-              user.joinedGroupIds.includes(parentGroup.id) ||
-              parentGroup.createdByUid === currentUid ||
-              parentGroup.memberUids?.includes(currentUid);
+            const isMember = isUserMemberOfGroup(parentGroup);
             if (!isMember) {
               return false;
             }
@@ -837,8 +927,10 @@ export default function App() {
     if (!targetGroup) return;
 
     const currentUid = user.authUid || user.id;
+    const storedJoined = getStoredJoinedGroupIds();
     const isMember = 
       user.joinedGroupIds.includes(groupId) ||
+      storedJoined.includes(groupId) ||
       (currentUid && currentUid !== 'guest' && targetGroup.createdByUid === currentUid) ||
       (currentUid && currentUid !== 'guest' && targetGroup.memberUids?.includes(currentUid));
 
@@ -852,12 +944,25 @@ export default function App() {
 
     const nowJoined = !isMember;
 
+    if (nowJoined) {
+      addStoredJoinedGroupId(groupId);
+    } else {
+      removeStoredJoinedGroupId(groupId);
+    }
+
+    const userIdentifiers = [
+      currentUid,
+      user.authUid,
+      user.id,
+      user.email
+    ].filter((u) => Boolean(u) && u !== 'guest') as string[];
+
     setGroups((prev) =>
       prev.map((g) => {
         if (g.id !== groupId) return g;
         const updatedMemberUids = nowJoined
-          ? Array.from(new Set([...(g.memberUids || []), currentUid]))
-          : (g.memberUids || []).filter((uid) => uid !== currentUid);
+          ? Array.from(new Set([...(g.memberUids || []), ...userIdentifiers]))
+          : (g.memberUids || []).filter((uid) => !userIdentifiers.includes(uid));
 
         const updated: StudyGroup = {
           ...g,
@@ -872,18 +977,19 @@ export default function App() {
     );
 
     if (currentUid && currentUid !== 'guest') {
-      toggleJoinSharedGroupInApi(groupId, currentUid, nowJoined).catch(() => {});
+      toggleJoinSharedGroupInApi(groupId, currentUid, nowJoined, userIdentifiers).catch(() => {});
     }
 
     setUser((prev) => {
       const updatedUser: UserProfile = {
         ...prev,
         joinedGroupIds: nowJoined
-          ? Array.from(new Set([...prev.joinedGroupIds, groupId]))
+          ? Array.from(new Set([...prev.joinedGroupIds, groupId, ...getStoredJoinedGroupIds()]))
           : prev.joinedGroupIds.filter((id) => id !== groupId),
       };
       saveStoredUser(updatedUser);
       syncUserProfileToFirestore(updatedUser).catch(() => {});
+      saveUserProfileToApi(updatedUser).catch(() => {});
       return updatedUser;
     });
   };
@@ -891,12 +997,24 @@ export default function App() {
   // Handler: Join group (specifically from JoinGroupModal with secret code or invite link)
   const handleJoinGroup = (targetGroup: StudyGroup) => {
     const currentUid = user.authUid || user.id;
-    const updatedMemberUids = Array.from(new Set([...(targetGroup.memberUids || []), currentUid]));
+    addStoredJoinedGroupId(targetGroup.id);
+
+    const userIdentifiers = [
+      currentUid,
+      user.authUid,
+      user.id,
+      user.email
+    ].filter((u) => Boolean(u) && u !== 'guest') as string[];
+
+    const updatedMemberUids = Array.from(new Set([
+      ...(targetGroup.memberUids || []),
+      ...userIdentifiers
+    ]));
 
     const updatedGroup: StudyGroup = {
       ...targetGroup,
       isJoined: true,
-      memberCount: targetGroup.isJoined ? targetGroup.memberCount : targetGroup.memberCount + 1,
+      memberCount: targetGroup.isJoined ? targetGroup.memberCount : Math.max(targetGroup.memberCount + 1, updatedMemberUids.length),
       memberUids: updatedMemberUids,
     };
 
@@ -908,20 +1026,29 @@ export default function App() {
       return [updatedGroup, ...prev];
     });
 
+    const updatedJoinedIds = Array.from(new Set([
+      ...(user.joinedGroupIds || []),
+      targetGroup.id,
+      ...getStoredJoinedGroupIds()
+    ]));
+
     const updatedUser: UserProfile = {
       ...user,
-      joinedGroupIds: Array.from(new Set([...user.joinedGroupIds, targetGroup.id])),
+      joinedGroupIds: updatedJoinedIds,
     };
     setUser(updatedUser);
     saveStoredUser(updatedUser);
 
     saveSharedGroupToApi(updatedGroup).catch(() => {});
     if (currentUid && currentUid !== 'guest') {
-      toggleJoinSharedGroupInApi(targetGroup.id, currentUid, true).catch(() => {});
+      toggleJoinSharedGroupInApi(targetGroup.id, currentUid, true, userIdentifiers).catch(() => {});
     }
     addGroupToFirestore(updatedGroup).catch(() => {});
     syncUserProfileToFirestore(updatedUser).catch(() => {});
+    saveUserProfileToApi(updatedUser).catch(() => {});
+
     setSelectedGroupId(targetGroup.id);
+    setActiveTab('materials');
   };
 
   // Handler: Update group (e.g. regenerate secret code from Invite modal)
@@ -938,14 +1065,16 @@ export default function App() {
 
   // Handler: Add new group
   const handleAddGroup = (newGroup: StudyGroup) => {
+    addStoredJoinedGroupId(newGroup.id);
     setGroups((prev) => [newGroup, ...prev.filter((g) => g.id !== newGroup.id)]);
     setUser((prev) => {
       const updatedUser: UserProfile = {
         ...prev,
-        joinedGroupIds: Array.from(new Set([...prev.joinedGroupIds, newGroup.id])),
+        joinedGroupIds: Array.from(new Set([...prev.joinedGroupIds, newGroup.id, ...getStoredJoinedGroupIds()])),
       };
       saveStoredUser(updatedUser);
       syncUserProfileToFirestore(updatedUser).catch(() => {});
+      saveUserProfileToApi(updatedUser).catch(() => {});
       return updatedUser;
     });
 
@@ -965,6 +1094,7 @@ export default function App() {
 
   // Handler: Delete study group (Only the person who created the group can delete it)
   const handleDeleteGroup = (groupId: string) => {
+    removeStoredJoinedGroupId(groupId);
     const targetGroup = groups.find((g) => g.id === groupId);
     const currentUid = user.authUid || user.id;
     const isCreator = Boolean(
@@ -1207,6 +1337,97 @@ export default function App() {
               }}
             />
 
+            {/* Dashboard Quick Access: My Enrolled Study Circles */}
+            {myJoinedGroups.length > 0 && (
+              <div className="mb-6 bg-white dark:bg-stone-900 rounded-2xl p-4 sm:p-5 border border-stone-200 dark:border-stone-800 shadow-2xs transition-colors">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 mb-3 border-b border-stone-100 dark:border-stone-800">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-blue-100 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold text-xs shrink-0">
+                      <Users className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-stone-900 dark:text-white">
+                        My Enrolled Study Circles ({myJoinedGroups.length})
+                      </h3>
+                      <p className="text-[11px] text-stone-500 dark:text-stone-400">
+                        Study circles you belong to. Click any circle to focus your dashboard.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      onClick={() => setIsJoinGroupOpen(true)}
+                      className="px-2.5 py-1 text-xs rounded-lg font-semibold bg-purple-50 dark:bg-purple-950/60 hover:bg-purple-100 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 flex items-center gap-1 cursor-pointer transition-colors"
+                      title="Enter private access code"
+                    >
+                      <Key className="w-3 h-3" />
+                      <span>Join with Code</span>
+                    </button>
+                    <button
+                      onClick={() => setIsCreateGroupOpen(true)}
+                      className="px-2.5 py-1 text-xs rounded-lg font-semibold bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 text-stone-700 dark:text-stone-300 border border-stone-200 dark:border-stone-700 flex items-center gap-1 cursor-pointer transition-colors"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>New Circle</span>
+                    </button>
+                    <button
+                      onClick={() => handleTabChange('groups')}
+                      className="px-2.5 py-1 text-xs rounded-lg font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/60 flex items-center gap-1 cursor-pointer transition-colors"
+                    >
+                      <span>All Circles</span>
+                      <ArrowRight className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2.5 overflow-x-auto pb-1 no-scrollbar">
+                  {/* All Circles Pill */}
+                  <button
+                    onClick={() => setSelectedGroupId(null)}
+                    className={`px-3 py-2 rounded-xl text-xs font-semibold shrink-0 flex items-center gap-2 border transition-all cursor-pointer ${
+                      selectedGroupId === null
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                        : 'bg-stone-50 dark:bg-stone-800/80 text-stone-700 dark:text-stone-300 border-stone-200 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-700'
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                    <span>All My Circles ({materials.length})</span>
+                  </button>
+
+                  {myJoinedGroups.map((g) => {
+                    const isSelected = selectedGroupId === g.id;
+                    const isPrivate = g.privacy === 'private';
+                    return (
+                      <button
+                        key={g.id}
+                        onClick={() => setSelectedGroupId(isSelected ? null : g.id)}
+                        className={`px-3 py-2 rounded-xl text-xs shrink-0 flex items-center gap-2 border transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-blue-50 dark:bg-blue-950/80 border-blue-500 dark:border-blue-400 ring-2 ring-blue-500/20 shadow-xs text-blue-900 dark:text-blue-100 font-bold'
+                            : 'bg-white dark:bg-stone-800/80 border-stone-200 dark:border-stone-700 hover:border-stone-300 text-stone-800 dark:text-stone-200 font-medium'
+                        }`}
+                      >
+                        <span className="text-base">{g.badgeEmoji || '📚'}</span>
+                        <div className="text-left">
+                          <div className="flex items-center gap-1">
+                            <span className="truncate max-w-[130px] sm:max-w-[170px]">{g.name}</span>
+                            {isPrivate ? (
+                              <Lock className="w-2.5 h-2.5 text-purple-600 dark:text-purple-400 shrink-0" />
+                            ) : (
+                              <Globe className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                            )}
+                          </div>
+                          <div className="text-[10px] text-stone-400 dark:text-stone-500 font-normal">
+                            {g.memberCount ?? 1} {(g.memberCount ?? 1) === 1 ? 'member' : 'members'} • {g.subject}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Filter and sorting toolbar */}
             <div id="problems-section">
               <FilterBar
@@ -1227,43 +1448,76 @@ export default function App() {
 
             {/* Materials Grid */}
             {filteredMaterials.length === 0 ? (
-              <div className="bg-white rounded-3xl border border-stone-200 p-10 sm:p-14 text-center max-w-xl mx-auto my-8 shadow-2xs">
-                <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-4 border border-blue-100 shadow-2xs">
-                  <BookOpen className="w-7 h-7" />
-                </div>
-                <h3 className="text-lg font-bold text-stone-900">
-                  {materials.length === 0 ? 'Ready for your first question!' : 'No matching problems found'}
-                </h3>
-                <p className="text-xs sm:text-sm text-stone-500 mt-1.5 mb-6 max-w-md mx-auto leading-relaxed">
-                  {materials.length === 0
-                    ? 'The workspace is fresh and ready. Upload an accounting, taxation, economics, business law, or financial management problem so your peers can solve and post PDF, image, or video solutions.'
-                    : 'No materials match your current subject, format, or status filters. Try clearing your filters or upload a new problem.'}
-                </p>
-                <div className="flex flex-wrap justify-center gap-2.5">
-                  {materials.length > 0 && (
+              selectedGroupId && selectedGroup ? (
+                <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-8 sm:p-12 text-center max-w-xl mx-auto my-8 shadow-2xs transition-colors">
+                  <div className="w-14 h-14 rounded-2xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 flex items-center justify-center mx-auto mb-3 border border-purple-200 dark:border-purple-800 text-2xl shadow-xs">
+                    {selectedGroup.badgeEmoji || '🔒'}
+                  </div>
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-purple-100 dark:bg-purple-950/80 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-800 mb-2">
+                    {selectedGroup.privacy === 'private' ? <Lock className="w-3 h-3" /> : <Globe className="w-3 h-3" />}
+                    <span>{selectedGroup.privacy === 'private' ? 'Private Circle Workspace' : 'Public Study Circle'}</span>
+                  </div>
+                  <h3 className="text-lg font-bold text-stone-900 dark:text-white">
+                    Welcome to {selectedGroup.name}!
+                  </h3>
+                  <p className="text-xs sm:text-sm text-stone-500 dark:text-stone-400 mt-1 mb-5 max-w-md mx-auto leading-relaxed">
+                    You have full access to this study circle ({selectedGroup.memberCount ?? 1} {(selectedGroup.memberCount ?? 1) === 1 ? 'member' : 'members'}). Share the first homework problem, trial balance, or question to start peer collaboration.
+                  </p>
+                  <div className="flex flex-wrap justify-center gap-2.5">
                     <button
-                      onClick={() => {
-                        setSelectedSubject('All');
-                        setSelectedFormat('all');
-                        setSelectedDifficulty('All');
-                        setSelectedStatus('all');
-                        setSearchQuery('');
-                        setSelectedGroupId(null);
-                      }}
-                      className="px-4 py-2.5 rounded-xl border border-stone-200 text-stone-700 text-xs font-semibold hover:bg-stone-50 transition-colors"
+                      onClick={() => setIsCreateMaterialOpen(true)}
+                      className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold transition-all shadow-sm flex items-center gap-2 cursor-pointer"
                     >
-                      Reset Filters
+                      <Plus className="w-4 h-4" />
+                      <span>Post First Question to Circle</span>
                     </button>
-                  )}
-                  <button
-                    onClick={() => setIsCreateMaterialOpen(true)}
-                    className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-sm flex items-center gap-2"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span>Upload First Question</span>
-                  </button>
+                    <button
+                      onClick={() => setSelectedGroupId(null)}
+                      className="px-4 py-2.5 rounded-xl border border-stone-200 dark:border-stone-700 text-stone-700 dark:text-stone-300 text-xs font-semibold hover:bg-stone-50 dark:hover:bg-stone-800 transition-colors cursor-pointer"
+                    >
+                      View All Circles
+                    </button>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-10 sm:p-14 text-center max-w-xl mx-auto my-8 shadow-2xs transition-colors">
+                  <div className="w-14 h-14 rounded-2xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto mb-4 border border-blue-100 dark:border-blue-900 shadow-2xs">
+                    <BookOpen className="w-7 h-7" />
+                  </div>
+                  <h3 className="text-lg font-bold text-stone-900 dark:text-white">
+                    {materials.length === 0 ? 'Ready for your first question!' : 'No matching problems found'}
+                  </h3>
+                  <p className="text-xs sm:text-sm text-stone-500 dark:text-stone-400 mt-1.5 mb-6 max-w-md mx-auto leading-relaxed">
+                    {materials.length === 0
+                      ? 'The workspace is fresh and ready. Upload an accounting, taxation, economics, business law, or financial management problem so your peers can solve and post PDF, image, or video solutions.'
+                      : 'No materials match your current subject, format, or status filters. Try clearing your filters or upload a new problem.'}
+                  </p>
+                  <div className="flex flex-wrap justify-center gap-2.5">
+                    {materials.length > 0 && (
+                      <button
+                        onClick={() => {
+                          setSelectedSubject('All');
+                          setSelectedFormat('all');
+                          setSelectedDifficulty('All');
+                          setSelectedStatus('all');
+                          setSearchQuery('');
+                          setSelectedGroupId(null);
+                        }}
+                        className="px-4 py-2.5 rounded-xl border border-stone-200 dark:border-stone-700 text-stone-700 dark:text-stone-300 text-xs font-semibold hover:bg-stone-50 dark:hover:bg-stone-800 transition-colors cursor-pointer"
+                      >
+                        Reset Filters
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setIsCreateMaterialOpen(true)}
+                      className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-sm flex items-center gap-2 cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>Upload First Question</span>
+                    </button>
+                  </div>
+                </div>
+              )
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                 {filteredMaterials.map((material) => (
@@ -1437,6 +1691,12 @@ export default function App() {
           initialCode={joinGroupInitialCode}
           initialGroupId={joinGroupInitialId}
           onOpenAuthModal={() => setIsAuthModalOpen(true)}
+          onNavigateToGroup={(groupId) => {
+            setSelectedGroupId(groupId);
+            setActiveTab('materials');
+            setIsJoinGroupOpen(false);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
         />
       )}
 

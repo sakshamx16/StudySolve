@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { 
   GraduationCap, 
   Search, 
@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { StudyGroup, UserProfile } from '../types';
 import { getStudentAvatar } from '../utils/avatar';
+import { getStoredJoinedGroupIds } from '../utils/storage';
 
 interface HeaderProps {
   groups: StudyGroup[];
@@ -66,6 +67,25 @@ export default function Header({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [groupDropdownOpen, setGroupDropdownOpen] = useState(false);
+
+  const isGroupAccessible = (g: StudyGroup): boolean => {
+    if (g.privacy !== 'private') return true;
+    if (g.isJoined) return true;
+    const currentUid = user.authUid || user.id;
+    if (g.createdByUid && (g.createdByUid === currentUid || (user.authUid && g.createdByUid === user.authUid))) return true;
+    if (user.joinedGroupIds && user.joinedGroupIds.includes(g.id)) return true;
+    const storedJoined = getStoredJoinedGroupIds();
+    if (storedJoined.includes(g.id)) return true;
+    const uidsToCheck = [user.authUid, user.id, user.email].filter(Boolean) as string[];
+    if (g.memberUids && g.memberUids.length > 0) {
+      if (uidsToCheck.some((uid) => g.memberUids?.includes(uid))) return true;
+    }
+    return false;
+  };
+
+  const visibleGroups = useMemo(() => {
+    return groups.filter(isGroupAccessible);
+  }, [groups, user]);
 
   const selectedGroup = groups.find((g) => g.id === selectedGroupId);
 
@@ -130,11 +150,11 @@ export default function Header({
                     >
                       <span className="flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-blue-500" />
-                        All Study Groups ({groups.length})
+                        All Study Groups ({visibleGroups.length})
                       </span>
                     </button>
                     <div className="my-1 border-t border-stone-100 dark:border-stone-800" />
-                    {groups.map((group) => (
+                    {visibleGroups.map((group: StudyGroup) => (
                       <button
                         key={group.id}
                         onClick={() => {
@@ -148,8 +168,13 @@ export default function Header({
                         <div className="flex items-center gap-2 truncate">
                           <span className="text-base">{group.badgeEmoji}</span>
                           <span className="truncate">{group.name}</span>
+                          {group.privacy === 'private' && (
+                            <span className="text-[10px] text-purple-600 dark:text-purple-400 font-bold shrink-0">
+                              🔒
+                            </span>
+                          )}
                         </div>
-                        <span className="text-[10px] text-stone-400 ml-2">
+                        <span className="text-[10px] text-stone-400 ml-2 shrink-0">
                           {group.materialsCount} sets
                         </span>
                       </button>
@@ -413,7 +438,7 @@ export default function Header({
             }`}
           >
             <Users className="w-3.5 h-3.5 shrink-0" />
-            <span>Study Groups ({groups.length})</span>
+            <span>Study Groups ({visibleGroups.length})</span>
           </button>
           <button
             onClick={() => onTabChange('top-solutions')}
@@ -476,7 +501,7 @@ export default function Header({
                   activeTab === 'groups' ? 'bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 font-semibold' : 'text-stone-700 dark:text-stone-200'
                 }`}
               >
-                👥 Study Groups ({groups.length})
+                👥 Study Groups ({visibleGroups.length})
               </button>
               <button
                 onClick={() => {
@@ -512,10 +537,10 @@ export default function Header({
                 }}
                 className="w-full bg-stone-100 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-xs rounded-lg p-2 text-stone-800 dark:text-stone-200 outline-none"
               >
-                <option value="">All Study Groups ({groups.length})</option>
-                {groups.map((g) => (
+                <option value="">All Study Groups ({visibleGroups.length})</option>
+                {visibleGroups.map((g: StudyGroup) => (
                   <option key={g.id} value={g.id}>
-                    {g.name}
+                    {g.privacy === 'private' ? '🔒 ' : ''}{g.name}
                   </option>
                 ))}
               </select>

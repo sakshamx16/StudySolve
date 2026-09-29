@@ -31,6 +31,7 @@ const DATA_DIR = path.join(process.cwd(), "data");
 const GROUPS_FILE = path.join(DATA_DIR, "shared_groups.json");
 const MATERIALS_FILE = path.join(DATA_DIR, "shared_materials.json");
 const SOLUTIONS_FILE = path.join(DATA_DIR, "shared_solutions.json");
+const USERS_FILE = path.join(DATA_DIR, "shared_users.json");
 
 function readJsonFile<T>(filePath: string, fallback: T): T {
   try {
@@ -117,12 +118,23 @@ app.post("/api/groups", (req, res) => {
     const groups = readJsonFile<any[]>(GROUPS_FILE, []);
     const existingIndex = groups.findIndex((g) => g.id === group.id);
     if (existingIndex >= 0) {
-      groups[existingIndex] = { ...groups[existingIndex], ...group };
+      const existing = groups[existingIndex];
+      // Merge memberUids so members from one user are never wiped out by updates from another!
+      const mergedMemberUids = Array.from(new Set([
+        ...(existing.memberUids || []),
+        ...(group.memberUids || [])
+      ]));
+      groups[existingIndex] = {
+        ...existing,
+        ...group,
+        memberUids: mergedMemberUids,
+        memberCount: Math.max(existing.memberCount || 1, group.memberCount || 1, mergedMemberUids.length)
+      };
     } else {
       groups.unshift(group);
     }
     writeJsonFile(GROUPS_FILE, groups);
-    res.json({ success: true, group });
+    res.json({ success: true, group: groups[existingIndex >= 0 ? existingIndex : 0] });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || "Failed to save group" });
   }
@@ -152,7 +164,7 @@ app.delete("/api/groups/:id", (req, res) => {
 app.post("/api/groups/:id/join", (req, res) => {
   try {
     const { id } = req.params;
-    const { userId, isJoining } = req.body;
+    const { userId, userIds, isJoining } = req.body;
     const groups = readJsonFile<any[]>(GROUPS_FILE, []);
     const targetGroup = groups.find((g) => g.id === id);
     if (!targetGroup) {
@@ -160,14 +172,19 @@ app.post("/api/groups/:id/join", (req, res) => {
     }
     const currentMembers: string[] = targetGroup.memberUids || [];
     let updatedMembers = [...currentMembers];
+    const incomingIds: string[] = Array.from(new Set([
+      ...(userId ? [userId] : []),
+      ...(Array.isArray(userIds) ? userIds : [])
+    ])).filter((u) => Boolean(u) && u !== 'guest');
+
     if (isJoining) {
-      if (userId && !updatedMembers.includes(userId)) {
-        updatedMembers.push(userId);
-      }
+      incomingIds.forEach((uid) => {
+        if (!updatedMembers.includes(uid)) {
+          updatedMembers.push(uid);
+        }
+      });
     } else {
-      if (userId) {
-        updatedMembers = updatedMembers.filter((u) => u !== userId);
-      }
+      updatedMembers = updatedMembers.filter((u) => !incomingIds.includes(u));
     }
     targetGroup.memberUids = updatedMembers;
     targetGroup.memberCount = Math.max(1, updatedMembers.length);
@@ -175,6 +192,52 @@ app.post("/api/groups/:id/join", (req, res) => {
     res.json({ success: true, group: targetGroup });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || "Failed to join group" });
+  }
+});
+
+// GET /api/users/:uid - Get stored user profile & joined groups
+app.get("/api/users/:uid", (req, res) => {
+  try {
+    const { uid } = req.params;
+    const users = readJsonFile<any[]>(USERS_FILE, []);
+    const user = users.find((u) => u.id === uid || u.authUid === uid || (u.email && u.email.toLowerCase() === uid.toLowerCase()));
+    if (!user) {
+      return res.status(404).json({ error: "User profile not found" });
+    }
+    res.json({ success: true, profile: user });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to fetch user" });
+  }
+});
+
+// POST /api/users - Save or update user profile with joined group IDs
+app.post("/api/users", (req, res) => {
+  try {
+    const { profile } = req.body;
+    if (!profile || (!profile.id && !profile.authUid)) {
+      return res.status(400).json({ error: "Missing required user profile fields" });
+    }
+    const targetUid = profile.authUid || profile.id;
+    const users = readJsonFile<any[]>(USERS_FILE, []);
+    const existingIndex = users.findIndex((u) => u.id === targetUid || u.authUid === targetUid);
+    if (existingIndex >= 0) {
+      const existing = users[existingIndex];
+      const mergedJoinedGroups = Array.from(new Set([
+        ...(existing.joinedGroupIds || []),
+        ...(profile.joinedGroupIds || [])
+      ]));
+      users[existingIndex] = {
+        ...existing,
+        ...profile,
+        joinedGroupIds: mergedJoinedGroups
+      };
+    } else {
+      users.unshift(profile);
+    }
+    writeJsonFile(USERS_FILE, users);
+    res.json({ success: true, profile: users[existingIndex >= 0 ? existingIndex : 0] });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to save user profile" });
   }
 });
 
