@@ -36,6 +36,7 @@ export default function MaterialCard({
   onDeleteMaterial,
 }: MaterialCardProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const materialSolutions = solutions.filter((s) => s.materialId === material.id);
   const hasSolutions = materialSolutions.length > 0;
   
@@ -177,24 +178,29 @@ export default function MaterialCard({
           {onDeleteMaterial && (
             confirmDelete ? (
               <div className="flex items-center gap-1 bg-rose-50 border border-rose-200 rounded-lg px-2 py-1 text-[11px] animate-in fade-in">
-                <span className="text-rose-800 font-semibold">Delete Question?</span>
+                <span className="text-rose-800 font-semibold">{isDeleting ? 'Deleting...' : 'Delete Question?'}</span>
                 <button
                   type="button"
+                  disabled={isDeleting}
                   onClick={(e) => {
+                    e.preventDefault();
                     e.stopPropagation();
+                    setIsDeleting(true);
                     onDeleteMaterial(material.id);
                   }}
-                  className="px-1.5 py-0.5 bg-rose-600 hover:bg-rose-700 text-white rounded text-[10px] font-bold"
+                  className="px-1.5 py-0.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white rounded text-[10px] font-bold transition-opacity"
                 >
-                  Yes
+                  {isDeleting ? '...' : 'Yes'}
                 </button>
                 <button
                   type="button"
+                  disabled={isDeleting}
                   onClick={(e) => {
+                    e.preventDefault();
                     e.stopPropagation();
                     setConfirmDelete(false);
                   }}
-                  className="px-1.5 py-0.5 bg-stone-200 hover:bg-stone-300 text-stone-700 rounded text-[10px]"
+                  className="px-1.5 py-0.5 bg-stone-200 hover:bg-stone-300 disabled:opacity-50 text-stone-700 rounded text-[10px]"
                 >
                   No
                 </button>
@@ -203,6 +209,7 @@ export default function MaterialCard({
               <button
                 type="button"
                 onClick={(e) => {
+                  e.preventDefault();
                   e.stopPropagation();
                   setConfirmDelete(true);
                 }}

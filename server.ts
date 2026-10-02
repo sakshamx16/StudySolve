@@ -30,6 +30,7 @@ app.use(express.json({ limit: "25mb" }));
 const DATA_DIR = path.join(process.cwd(), "data");
 const GROUPS_FILE = path.join(DATA_DIR, "shared_groups.json");
 const MATERIALS_FILE = path.join(DATA_DIR, "shared_materials.json");
+const DELETED_MATERIALS_FILE = path.join(DATA_DIR, "deleted_materials.json");
 const SOLUTIONS_FILE = path.join(DATA_DIR, "shared_solutions.json");
 const USERS_FILE = path.join(DATA_DIR, "shared_users.json");
 
@@ -243,7 +244,11 @@ app.post("/api/users", (req, res) => {
 
 // GET /api/materials
 app.get("/api/materials", (_req, res) => {
-  const materials = readJsonFile<any[]>(MATERIALS_FILE, []);
+  const deletedIds = new Set(readJsonFile<string[]>(DELETED_MATERIALS_FILE, []));
+  let materials = readJsonFile<any[]>(MATERIALS_FILE, []);
+  if (deletedIds.size > 0) {
+    materials = materials.filter((m) => !deletedIds.has(m.id));
+  }
   res.json({ materials });
 });
 
@@ -254,6 +259,13 @@ app.post("/api/materials", (req, res) => {
     if (!material || !material.id) {
       return res.status(400).json({ error: "Missing required material fields" });
     }
+    // Remove from deleted tracking if re-added
+    let deletedIds = readJsonFile<string[]>(DELETED_MATERIALS_FILE, []);
+    if (deletedIds.includes(material.id)) {
+      deletedIds = deletedIds.filter((d) => d !== material.id);
+      writeJsonFile(DELETED_MATERIALS_FILE, deletedIds);
+    }
+
     const materials = readJsonFile<any[]>(MATERIALS_FILE, []);
     const existingIdx = materials.findIndex((m) => m.id === material.id);
     if (existingIdx >= 0) {
@@ -283,8 +295,32 @@ app.delete("/api/materials/:id", (req, res) => {
   try {
     const { id } = req.params;
     let materials = readJsonFile<any[]>(MATERIALS_FILE, []);
+    const matToDelete = materials.find((m) => m.id === id);
     materials = materials.filter((m) => m.id !== id);
     writeJsonFile(MATERIALS_FILE, materials);
+
+    // Also remove associated solutions
+    let solutions = readJsonFile<any[]>(SOLUTIONS_FILE, []);
+    solutions = solutions.filter((s) => s.materialId !== id);
+    writeJsonFile(SOLUTIONS_FILE, solutions);
+
+    // If belongs to group, decrement group's materialsCount
+    if (matToDelete?.groupId) {
+      const groups = readJsonFile<any[]>(GROUPS_FILE, []);
+      const grp = groups.find((g) => g.id === matToDelete.groupId);
+      if (grp) {
+        grp.materialsCount = Math.max(0, (grp.materialsCount || 1) - 1);
+        writeJsonFile(GROUPS_FILE, groups);
+      }
+    }
+
+    // Record in deleted materials list to prevent accidental resurrection from race conditions
+    let deletedIds = readJsonFile<string[]>(DELETED_MATERIALS_FILE, []);
+    if (!deletedIds.includes(id)) {
+      deletedIds.push(id);
+      writeJsonFile(DELETED_MATERIALS_FILE, deletedIds);
+    }
+
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || "Failed to delete material" });

@@ -43,6 +43,7 @@ export default function MaterialDetailModal({
   onDeleteMaterial,
 }: MaterialDetailModalProps) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [solutionTypeFilter, setSolutionTypeFilter] = useState<'all' | 'pdf' | 'image' | 'video'>('all');
   const [sortBy, setSortBy] = useState<'rating' | 'newest' | 'helpful'>('rating');
 
@@ -124,18 +125,25 @@ export default function MaterialDetailModal({
               <div className="flex items-center gap-2 shrink-0">
                 <button
                   type="button"
-                  onClick={() => {
-                    onDeleteMaterial?.(material.id);
-                    onClose();
+                  disabled={isDeleting}
+                  onClick={async () => {
+                    setIsDeleting(true);
+                    try {
+                      await onDeleteMaterial?.(material.id);
+                    } finally {
+                      onClose();
+                    }
                   }}
-                  className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-xs transition-colors"
+                  className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-xs font-bold shadow-xs transition-colors flex items-center gap-1.5"
                 >
-                  Yes, Delete Question
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{isDeleting ? 'Deleting...' : 'Yes, Delete Question'}</span>
                 </button>
                 <button
                   type="button"
+                  disabled={isDeleting}
                   onClick={() => setShowDeleteConfirm(false)}
-                  className="px-3 py-1.5 rounded-xl bg-white hover:bg-stone-100 text-stone-700 border border-stone-300 text-xs font-semibold transition-colors"
+                  className="px-3 py-1.5 rounded-xl bg-white hover:bg-stone-100 disabled:opacity-50 text-stone-700 border border-stone-300 text-xs font-semibold transition-colors"
                 >
                   Cancel
                 </button>

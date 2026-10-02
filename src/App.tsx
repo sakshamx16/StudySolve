@@ -54,6 +54,8 @@ import {
   getStoredJoinedGroupIds,
   addStoredJoinedGroupId,
   removeStoredJoinedGroupId,
+  getStoredDeletedMaterialIds,
+  addStoredDeletedMaterialId,
   saveUserProfileToApi,
   fetchUserProfileFromApi
 } from './utils/storage';
@@ -497,8 +499,10 @@ export default function App() {
     });
 
     fetchSharedMaterialsFromApi().then((serverMats) => {
-      if (serverMats && Array.isArray(serverMats) && serverMats.length > 0) {
-        setMaterials(serverMats);
+      if (serverMats && Array.isArray(serverMats)) {
+        const deletedIds = new Set(getStoredDeletedMaterialIds());
+        const cleaned = serverMats.filter((m) => !deletedIds.has(m.id));
+        setMaterials(cleaned);
       }
     });
 
@@ -516,9 +520,11 @@ export default function App() {
 
       fetchSharedMaterialsFromApi().then((serverMats) => {
         if (serverMats && Array.isArray(serverMats)) {
+          const deletedIds = new Set(getStoredDeletedMaterialIds());
+          const cleaned = serverMats.filter((m) => !deletedIds.has(m.id));
           setMaterials((prev) => {
-            if (JSON.stringify(prev) !== JSON.stringify(serverMats)) {
-              return serverMats;
+            if (JSON.stringify(prev) !== JSON.stringify(cleaned)) {
+              return cleaned;
             }
             return prev;
           });
@@ -553,8 +559,15 @@ export default function App() {
     });
 
     const unsubMaterials = subscribeToFirestoreMaterials((liveMaterials) => {
-      if (liveMaterials && liveMaterials.length > 0) {
-        setMaterials(liveMaterials);
+      if (Array.isArray(liveMaterials)) {
+        const deletedIds = new Set(getStoredDeletedMaterialIds());
+        const cleaned = liveMaterials.filter((m) => !deletedIds.has(m.id));
+        setMaterials((prev) => {
+          if (JSON.stringify(prev) !== JSON.stringify(cleaned)) {
+            return cleaned;
+          }
+          return prev;
+        });
       }
     });
 
@@ -723,16 +736,63 @@ export default function App() {
 
   // Handler: Delete study material (for questions sent mistakenly)
   const handleDeleteMaterial = async (materialId: string) => {
-    deleteSharedMaterialFromApi(materialId).catch(() => {});
-    try {
-      await deleteMaterialFromFirestore(materialId);
-    } catch (err) {
-      console.info('Firestore material delete notice:', err);
-    }
-    setMaterials((prev) => prev.filter((m) => m.id !== materialId));
-    setSolutions((prev) => prev.filter((s) => s.materialId !== materialId));
+    // 1. Immediately register as permanently deleted to prevent any race condition resurrection
+    addStoredDeletedMaterialId(materialId);
+
+    const targetMat = materials.find((m) => m.id === materialId);
+
+    // 2. Synchronous optimistic UI and storage update
+    setMaterials((prev) => {
+      const updated = prev.filter((m) => m.id !== materialId);
+      saveStoredMaterials(updated);
+      return updated;
+    });
+
+    setSolutions((prev) => {
+      const updated = prev.filter((s) => s.materialId !== materialId);
+      saveStoredSolutions(updated);
+      return updated;
+    });
+
     if (detailMaterial && detailMaterial.id === materialId) {
       setDetailMaterial(null);
+    }
+
+    // 3. Decrement group materials count
+    if (targetMat?.groupId) {
+      setGroups((prev) =>
+        prev.map((g) => {
+          if (g.id === targetMat.groupId) {
+            const updated = { ...g, materialsCount: Math.max(0, (g.materialsCount || 1) - 1) };
+            saveSharedGroupToApi(updated).catch(() => {});
+            addGroupToFirestore(updated).catch(() => {});
+            return updated;
+          }
+          return g;
+        })
+      );
+    }
+
+    // 4. Update user stats if the author deleted their question
+    if (targetMat && (targetMat.authorUid === user.id || targetMat.authorUid === user.authUid || targetMat.author?.name === user.name)) {
+      setUser((prev) => {
+        const updated = {
+          ...prev,
+          materialsShared: Math.max(0, prev.materialsShared - 1),
+        };
+        saveStoredUser(updated);
+        return updated;
+      });
+    }
+
+    // 5. Parallel background sync for server API and Firestore
+    try {
+      await Promise.allSettled([
+        deleteSharedMaterialFromApi(materialId),
+        deleteMaterialFromFirestore(materialId),
+      ]);
+    } catch (err) {
+      console.info('Material delete network sync notice:', err);
     }
   };
 

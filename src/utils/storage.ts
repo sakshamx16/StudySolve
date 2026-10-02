@@ -78,14 +78,39 @@ export function saveStoredGroups(groups: StudyGroup[]): void {
   }
 }
 
+const DELETED_MATERIALS_KEY = 'studysolve_deleted_materials';
+
+export function getStoredDeletedMaterialIds(): string[] {
+  try {
+    const raw = localStorage.getItem(DELETED_MATERIALS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function addStoredDeletedMaterialId(materialId: string): void {
+  try {
+    const ids = getStoredDeletedMaterialIds();
+    if (!ids.includes(materialId)) {
+      ids.push(materialId);
+      localStorage.setItem(DELETED_MATERIALS_KEY, JSON.stringify(ids));
+    }
+  } catch {
+    // ignore
+  }
+}
+
 export function getStoredMaterials(): StudyMaterial[] {
   try {
+    const deletedIds = new Set(getStoredDeletedMaterialIds());
     const raw = localStorage.getItem(MATERIALS_STORAGE_KEY);
     if (!raw) {
       localStorage.setItem(MATERIALS_STORAGE_KEY, JSON.stringify(initialMaterials));
-      return initialMaterials;
+      return initialMaterials.filter((m) => !deletedIds.has(m.id));
     }
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((m: StudyMaterial) => !deletedIds.has(m.id)) : [];
   } catch (err) {
     console.warn('Error reading materials from storage, using defaults', err);
     return initialMaterials;
@@ -94,7 +119,9 @@ export function getStoredMaterials(): StudyMaterial[] {
 
 export function saveStoredMaterials(materials: StudyMaterial[]): void {
   try {
-    localStorage.setItem(MATERIALS_STORAGE_KEY, JSON.stringify(materials));
+    const deletedIds = new Set(getStoredDeletedMaterialIds());
+    const filtered = materials.filter((m) => !deletedIds.has(m.id));
+    localStorage.setItem(MATERIALS_STORAGE_KEY, JSON.stringify(filtered));
   } catch (err) {
     console.error('Error saving materials to storage', err);
   }
@@ -361,12 +388,14 @@ export async function fetchUserProfileFromApi(uid: string): Promise<UserProfile 
 
 export async function fetchSharedMaterialsFromApi(): Promise<StudyMaterial[]> {
   try {
+    const deletedIds = new Set(getStoredDeletedMaterialIds());
     const res = await fetch('/api/materials');
     if (!res.ok) return getStoredMaterials();
     const data = await res.json();
     if (Array.isArray(data.materials)) {
-      saveStoredMaterials(data.materials);
-      return data.materials;
+      const filtered = data.materials.filter((m: StudyMaterial) => !deletedIds.has(m.id));
+      saveStoredMaterials(filtered);
+      return filtered;
     }
   } catch {
     // Silent catch
@@ -387,8 +416,11 @@ export async function saveSharedMaterialToApi(material: StudyMaterial): Promise<
 }
 
 export async function deleteSharedMaterialFromApi(materialId: string): Promise<void> {
+  addStoredDeletedMaterialId(materialId);
+  const current = getStoredMaterials().filter((m) => m.id !== materialId);
+  saveStoredMaterials(current);
   try {
-    await fetch(`/api/materials/${materialId}`, { method: 'DELETE' });
+    await fetch(`/api/materials/${encodeURIComponent(materialId)}`, { method: 'DELETE' });
   } catch {
     // Silent catch
   }

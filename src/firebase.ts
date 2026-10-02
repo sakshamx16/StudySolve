@@ -300,6 +300,22 @@ export async function deleteMaterialFromFirestore(materialId: string): Promise<v
   try {
     const docRef = doc(db, 'materials', materialId);
     await deleteDoc(docRef);
+
+    // Also clean up any associated solutions in Firestore
+    try {
+      const solsQuery = query(collection(db, 'solutions'));
+      const snap = await getDocs(solsQuery);
+      const deletePromises: Promise<void>[] = [];
+      snap.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data.materialId === materialId) {
+          deletePromises.push(deleteDoc(docSnap.ref));
+        }
+      });
+      await Promise.allSettled(deletePromises);
+    } catch (solErr) {
+      console.info('Associated solutions delete notice:', solErr);
+    }
   } catch (err) {
     console.info('Firestore material delete notice:', err);
   }
