@@ -28,7 +28,7 @@ import {
   browserLocalPersistence,
   User as FirebaseUser
 } from 'firebase/auth';
-import { StudyMaterial, Solution, StudyGroup, UserProfile } from './types';
+import { StudyMaterial, Solution, StudyGroup, UserProfile, GroupMessage } from './types';
 
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
 export const firebaseConfig = {
@@ -433,6 +433,42 @@ export async function deleteGroupFromFirestore(groupId: string): Promise<void> {
     await deleteDoc(docRef);
   } catch (err) {
     console.info('Firestore group delete notice:', err);
+  }
+}
+
+// Subscribe to real-time chat messages for a specific study circle
+export function subscribeToGroupMessages(
+  groupId: string,
+  onData: (messages: GroupMessage[]) => void,
+  onError?: (err: any) => void
+): Unsubscribe {
+  const colRef = collection(db, 'study_groups', groupId, 'messages');
+  return onSnapshot(
+    colRef,
+    (snapshot) => {
+      const items: GroupMessage[] = [];
+      snapshot.forEach((d) => {
+        items.push({ id: d.id, ...d.data() } as GroupMessage);
+      });
+      // Sort oldest to newest for chronological chat
+      items.sort((a, b) => (a.createdAtMs || 0) - (b.createdAtMs || 0));
+      onData(items);
+    },
+    (err) => {
+      console.info('Firestore group messages subscription notice:', err);
+      if (onError) onError(err);
+    }
+  );
+}
+
+// Send a chat message to Firestore
+export async function sendMessageToFirestore(message: GroupMessage): Promise<void> {
+  try {
+    const docRef = doc(db, 'study_groups', message.groupId, 'messages', message.id);
+    const sanitized = sanitizeForFirestore(message);
+    await setDoc(docRef, sanitized, { merge: true });
+  } catch (err) {
+    console.info('Firestore message send notice:', err);
   }
 }
 

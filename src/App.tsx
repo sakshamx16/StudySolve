@@ -56,6 +56,8 @@ import {
   removeStoredJoinedGroupId,
   getStoredDeletedMaterialIds,
   addStoredDeletedMaterialId,
+  addStoredCreatedGroupId,
+  isRealGroupHost,
   saveUserProfileToApi,
   fetchUserProfileFromApi
 } from './utils/storage';
@@ -73,9 +75,10 @@ import CreateGroupModal from './components/CreateGroupModal';
 import EditProfileModal from './components/EditProfileModal';
 import AuthModal from './components/AuthModal';
 import StudyGroupsList from './components/StudyGroupsList';
+import GroupChatHub from './components/GroupChatHub';
 import TopSolutionsView from './components/TopSolutionsView';
 import TopSolversLeaderboard from './components/TopSolversLeaderboard';
-import AIChatbox from './components/AIChatbox';
+import PrivateStylusNotes from './components/PrivateStylusNotes';
 import SelectQuestionToSolveModal from './components/SelectQuestionToSolveModal';
 import JoinGroupModal from './components/JoinGroupModal';
 import InviteMembersModal from './components/InviteMembersModal';
@@ -141,21 +144,50 @@ export default function App() {
     return 'materials';
   };
 
+  const getInitialViewingGroupId = (): string | null => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    const grpParam = params.get('group');
+    if (grpParam) return grpParam;
+    const path = window.location.pathname;
+    if (path.startsWith('/group/')) {
+      return path.replace('/group/', '').trim() || null;
+    }
+    return null;
+  };
+
   const [activeTab, setActiveTab] = useState<'materials' | 'groups' | 'top-solutions' | 'leaderboard'>(getInitialTab);
+  const [viewingGroupId, setViewingGroupId] = useState<string | null>(getInitialViewingGroupId);
+
+  const handleOpenGroupHub = (groupId: string) => {
+    setViewingGroupId(groupId);
+    setSelectedGroupId(groupId);
+    setActiveTab('groups');
+    if (typeof window !== 'undefined' && window.history?.pushState) {
+      window.history.pushState({ tab: 'groups', group: groupId }, '', `/?tab=groups&group=${encodeURIComponent(groupId)}`);
+    }
+  };
+
+  const handleCloseGroupHub = () => {
+    setViewingGroupId(null);
+    if (typeof window !== 'undefined' && window.history?.pushState) {
+      window.history.pushState({ tab: 'groups' }, '', '/?tab=groups');
+    }
+  };
 
   const handleTabChange = (tab: 'materials' | 'groups' | 'top-solutions' | 'leaderboard') => {
+    setViewingGroupId(null);
     setActiveTab(tab);
     if (typeof window !== 'undefined' && window.history?.pushState) {
-      const targetUrl = tab === 'materials' ? '/' : `/${tab}`;
-      if (window.location.pathname !== targetUrl) {
-        window.history.pushState({ tab }, '', targetUrl);
-      }
+      const targetUrl = tab === 'materials' ? '/' : `/?tab=${tab}`;
+      window.history.pushState({ tab }, '', targetUrl);
     }
   };
 
   useEffect(() => {
     const handlePopState = () => {
       setActiveTab(getInitialTab());
+      setViewingGroupId(getInitialViewingGroupId());
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
@@ -585,6 +617,11 @@ export default function App() {
       unsubSolutions();
     };
   }, []);
+
+  // Active Group for WhatsApp-style Group Chat Hub
+  const viewingGroup = useMemo(() => {
+    return viewingGroupId ? groups.find((g) => g.id === viewingGroupId) || null : null;
+  }, [groups, viewingGroupId]);
 
   // Available subjects for filtering (combining materials & groups)
   const availableSubjects = useMemo(() => {
@@ -1126,6 +1163,7 @@ export default function App() {
   // Handler: Add new group
   const handleAddGroup = (newGroup: StudyGroup) => {
     addStoredJoinedGroupId(newGroup.id);
+    addStoredCreatedGroupId(newGroup.id);
     setGroups((prev) => [newGroup, ...prev.filter((g) => g.id !== newGroup.id)]);
     setUser((prev) => {
       const updatedUser: UserProfile = {
@@ -1249,8 +1287,8 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 overflow-x-hidden">
-        {/* Active Group Filter Banner (if a specific group is selected) */}
-        {selectedGroupId && selectedGroup && (
+        {/* Active Group Filter Banner (if a specific group is selected in general materials view) */}
+        {!viewingGroup && selectedGroupId && selectedGroup && (
           <div className="bg-white dark:bg-stone-900 rounded-2xl p-4 sm:p-5 border border-stone-200 dark:border-stone-800 shadow-2xs mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 transition-colors">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-900 flex items-center justify-center text-xl shrink-0">
@@ -1293,17 +1331,12 @@ export default function App() {
             </div>
 
             {(() => {
-              const currentUid = user.authUid || user.id;
-              const isSelectedGroupCreator = Boolean(
-                currentUid &&
-                currentUid !== 'guest' &&
-                selectedGroup.createdByUid &&
-                (selectedGroup.createdByUid === currentUid || (user.authUid && selectedGroup.createdByUid === user.authUid))
-              );
+              const isSelectedGroupCreator = isRealGroupHost(selectedGroup, user);
               const isSelectedGroupMember = 
                 isSelectedGroupCreator ||
                 user.joinedGroupIds.includes(selectedGroup.id) ||
-                Boolean(currentUid && currentUid !== 'guest' && selectedGroup.memberUids?.includes(currentUid));
+                Boolean(user.id && user.id !== 'guest' && selectedGroup.memberUids?.includes(user.id)) ||
+                Boolean(user.authUid && selectedGroup.memberUids?.includes(user.authUid));
 
               return (
                 <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
@@ -1597,27 +1630,49 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 2: STUDY GROUPS VIEW */}
+        {/* TAB 2: STUDY GROUPS VIEW (LIST OR WHATSAPP-STYLE GROUP HUB) */}
         {activeTab === 'groups' && (
-          <StudyGroupsList
-            groups={groups}
-            onToggleJoinGroup={handleToggleJoinGroup}
-            onSelectGroupMaterials={(groupId) => {
-              setSelectedGroupId(groupId);
-              handleTabChange('materials');
-            }}
-            onOpenCreateGroupModal={() => setIsCreateGroupOpen(true)}
-            onDeleteGroup={handleDeleteGroup}
-            onRestoreDefaultGroups={handleRestoreDefaultGroups}
-            currentUser={user}
-            onOpenAuthModal={() => setIsAuthModalOpen(true)}
-            onOpenJoinCodeModal={(targetId, code) => {
-              setJoinGroupInitialId(targetId || '');
-              setJoinGroupInitialCode(code || '');
-              setIsJoinGroupOpen(true);
-            }}
-            onOpenInviteModal={(group) => setInviteGroup(group)}
-          />
+          viewingGroup ? (
+            <GroupChatHub
+              group={viewingGroup}
+              currentUser={user}
+              materials={materials}
+              solutions={solutions}
+              onBack={handleCloseGroupHub}
+              onOpenCreateMaterial={(defaultGroupId) => {
+                setSelectedGroupId(defaultGroupId || viewingGroup.id);
+                setIsCreateMaterialOpen(true);
+              }}
+              onOpenMaterialDetail={(mat) => setDetailMaterial(mat)}
+              onPostSolution={(mat) => setPostSolutionMaterial(mat)}
+              onDeleteMaterial={handleDeleteMaterial}
+              onUpdateGroup={handleUpdateGroup}
+              onOpenInviteModal={(grp) => setInviteGroup(grp)}
+            />
+          ) : (
+            <StudyGroupsList
+              groups={groups}
+              onToggleJoinGroup={handleToggleJoinGroup}
+              onSelectGroupMaterials={(groupId) => {
+                handleOpenGroupHub(groupId);
+              }}
+              onSelectGroup={(groupId) => {
+                if (groupId) handleOpenGroupHub(groupId);
+              }}
+              onUpdateGroup={handleUpdateGroup}
+              onOpenCreateGroupModal={() => setIsCreateGroupOpen(true)}
+              onDeleteGroup={handleDeleteGroup}
+              onRestoreDefaultGroups={handleRestoreDefaultGroups}
+              currentUser={user}
+              onOpenAuthModal={() => setIsAuthModalOpen(true)}
+              onOpenJoinCodeModal={(targetId, code) => {
+                setJoinGroupInitialId(targetId || '');
+                setJoinGroupInitialCode(code || '');
+                setIsJoinGroupOpen(true);
+              }}
+              onOpenInviteModal={(group) => setInviteGroup(group)}
+            />
+          )
         )}
 
         {/* TAB 3: TOP SOLUTIONS SHOWCASE */}
@@ -1771,8 +1826,8 @@ export default function App() {
         />
       )}
 
-      {/* Floating AI Assistant Chatbox (Text + Image Question Solving) */}
-      <AIChatbox />
+      {/* Floating Private Stylus Notes & Scratchpad */}
+      <PrivateStylusNotes />
 
       {/* Footer */}
       <footer className="mt-auto border-t border-stone-200 bg-white py-6 text-xs text-stone-500">

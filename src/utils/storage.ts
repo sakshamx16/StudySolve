@@ -1,4 +1,4 @@
-import { StudyGroup, StudyMaterial, Solution, UserProfile, SolutionReview } from '../types';
+import { StudyGroup, StudyMaterial, Solution, UserProfile, SolutionReview, GroupMessage } from '../types';
 import { initialGroups, initialMaterials, initialSolutions, currentUser, GUEST_USER } from '../data/initialData';
 
 const GROUPS_STORAGE_KEY = 'studysolve_v2_groups';
@@ -6,6 +6,113 @@ const MATERIALS_STORAGE_KEY = 'studysolve_v2_materials';
 const SOLUTIONS_STORAGE_KEY = 'studysolve_v2_solutions';
 const USER_STORAGE_KEY = 'studysolve_v2_user';
 const JOINED_GROUPS_STORAGE_KEY = 'studysolve_joined_group_ids';
+const CREATED_GROUPS_STORAGE_KEY = 'studysolve_created_group_ids';
+const CLIENT_UID_KEY = 'studysolve_client_device_uid';
+const GROUP_MESSAGES_PREFIX = 'studysolve_group_messages_';
+
+export function getOrCreateClientUid(): string {
+  try {
+    let uid = localStorage.getItem(CLIENT_UID_KEY);
+    if (!uid) {
+      uid = `usr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      localStorage.setItem(CLIENT_UID_KEY, uid);
+    }
+    return uid;
+  } catch {
+    return `usr_${Date.now()}`;
+  }
+}
+
+export function getStoredCreatedGroupIds(): string[] {
+  try {
+    const raw = localStorage.getItem(CREATED_GROUPS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
+export function addStoredCreatedGroupId(groupId: string): void {
+  if (!groupId) return;
+  try {
+    const current = getStoredCreatedGroupIds();
+    if (!current.includes(groupId)) {
+      localStorage.setItem(CREATED_GROUPS_STORAGE_KEY, JSON.stringify([...current, groupId]));
+    }
+  } catch {}
+}
+
+export function isRealGroupHost(
+  group: StudyGroup | null | undefined, 
+  user: UserProfile | null | undefined
+): boolean {
+  if (!group || !user) return false;
+
+  const createdByUid = (group.createdByUid || '').trim();
+  const createdGroupIds = getStoredCreatedGroupIds();
+
+  // 1. Check if this client browser session explicitly created this circle
+  const isCreatedOnThisDevice = createdGroupIds.includes(group.id);
+  if (isCreatedOnThisDevice) {
+    return true;
+  }
+
+  const authUid = (user.authUid || '').trim();
+  const currentId = (user.id || '').trim();
+  const userEmail = (user.email || '').trim().toLowerCase();
+  const clientUid = getOrCreateClientUid();
+
+  // 2. Strict UID match against non-generic UID
+  if (createdByUid && createdByUid !== 'guest' && createdByUid !== 'anonymous') {
+    if (authUid && createdByUid === authUid) return true;
+    if (currentId && currentId !== 'guest' && createdByUid === currentId) return true;
+    if (userEmail && createdByUid.toLowerCase() === userEmail) return true;
+    if (clientUid && createdByUid === clientUid) return true;
+  }
+
+  // Any other user who joined the circle is NOT the host
+  return false;
+}
+
+export function getStoredGroupMessages(groupId: string): GroupMessage[] {
+  try {
+    const raw = localStorage.getItem(`${GROUP_MESSAGES_PREFIX}${groupId}`);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveStoredGroupMessages(groupId: string, messages: GroupMessage[]): void {
+  try {
+    localStorage.setItem(`${GROUP_MESSAGES_PREFIX}${groupId}`, JSON.stringify(messages.slice(-300)));
+  } catch {}
+}
+
+export async function fetchGroupMessagesFromApi(groupId: string): Promise<GroupMessage[]> {
+  try {
+    const res = await fetch(`/api/groups/${encodeURIComponent(groupId)}/messages`);
+    if (!res.ok) return getStoredGroupMessages(groupId);
+    const data = await res.json();
+    if (Array.isArray(data.messages)) {
+      saveStoredGroupMessages(groupId, data.messages);
+      return data.messages;
+    }
+  } catch {}
+  return getStoredGroupMessages(groupId);
+}
+
+export async function sendGroupMessageToApi(message: GroupMessage): Promise<void> {
+  try {
+    await fetch(`/api/groups/${encodeURIComponent(message.groupId)}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message }),
+    });
+  } catch {}
+}
 
 export function getStoredJoinedGroupIds(): string[] {
   try {

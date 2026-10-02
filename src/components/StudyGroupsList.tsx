@@ -13,10 +13,14 @@ import {
   LogOut,
   Crown,
   Globe,
-  Sparkles
+  Sparkles,
+  Settings,
+  MessageSquare
 } from 'lucide-react';
 import { StudyGroup, Subject, UserProfile } from '../types';
-import { getStoredJoinedGroupIds } from '../utils/storage';
+import { getStoredJoinedGroupIds, isRealGroupHost } from '../utils/storage';
+import GroupMembersModal from './GroupMembersModal';
+import EditGroupModal from './EditGroupModal';
 
 interface StudyGroupsListProps {
   groups: StudyGroup[];
@@ -31,6 +35,7 @@ interface StudyGroupsListProps {
   onOpenInviteModal?: (group: StudyGroup) => void;
   selectedGroupId?: string | null;
   onSelectGroup?: (groupId: string | null) => void;
+  onUpdateGroup?: (updatedGroup: StudyGroup) => void;
 }
 
 const subjects: (Subject | 'All')[] = [
@@ -58,11 +63,14 @@ export default function StudyGroupsList({
   onOpenInviteModal,
   selectedGroupId,
   onSelectGroup,
+  onUpdateGroup,
 }: StudyGroupsListProps) {
   const [selectedSubject, setSelectedSubject] = useState<Subject | 'All'>('All');
   const [selectedCategory, setSelectedCategory] = useState<'all' | 'my-groups' | 'public' | 'private'>('all');
   const [groupToDelete, setGroupToDelete] = useState<StudyGroup | null>(null);
   const [groupToLeave, setGroupToLeave] = useState<StudyGroup | null>(null);
+  const [groupToEdit, setGroupToEdit] = useState<StudyGroup | null>(null);
+  const [groupForMembers, setGroupForMembers] = useState<StudyGroup | null>(null);
 
   const isLoggedIn = Boolean(
     currentUser.name && 
@@ -78,15 +86,7 @@ export default function StudyGroupsList({
   );
 
   const isGroupCreator = (group: StudyGroup): boolean => {
-    const currentUid = currentUser.authUid || currentUser.id;
-    if (!currentUid) return false;
-    if (!group.createdByUid) return false;
-    return (
-      group.createdByUid === currentUid ||
-      Boolean(currentUser.authUid && group.createdByUid === currentUser.authUid) ||
-      Boolean(currentUser.id && group.createdByUid === currentUser.id) ||
-      Boolean(currentUser.name && group.leaderName && currentUser.name.toLowerCase().trim() === group.leaderName.toLowerCase().trim())
-    );
+    return isRealGroupHost(group, currentUser);
   };
 
   const isUserMember = (group: StudyGroup): boolean => {
@@ -461,7 +461,22 @@ export default function StudyGroupsList({
                         </button>
                       )}
 
-                      {/* ONLY the person who created the group can delete that group */}
+                      {/* ONLY the host can edit the group name, profile, description, etc. */}
+                      {isCreator && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setGroupToEdit(group);
+                          }}
+                          title="Edit circle name, description & profile (Host only)"
+                          aria-label={`Edit ${group.name}`}
+                          className="p-1.5 rounded-lg text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/50 transition-colors shrink-0 cursor-pointer"
+                        >
+                          <Settings className="w-4 h-4" />
+                        </button>
+                      )}
+
+                      {/* ONLY the host who created the group can delete that group */}
                       {isCreator && (
                         <button
                           onClick={(e) => {
@@ -505,10 +520,18 @@ export default function StudyGroupsList({
                   )}
 
                   <div className="flex items-center gap-4 text-xs text-stone-500 dark:text-stone-400 py-2 border-t border-stone-100 dark:border-stone-800">
-                    <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setGroupForMembers(group);
+                      }}
+                      className="flex items-center gap-1 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer text-left"
+                      title="View members joined in this circle"
+                    >
                       <Users className="w-3.5 h-3.5 text-stone-400" />
                       <strong className="text-stone-800 dark:text-stone-200">{group.memberCount}</strong> members
-                    </div>
+                    </button>
                     <div className="flex items-center gap-1">
                       <BookOpen className="w-3.5 h-3.5 text-stone-400" />
                       <strong className="text-stone-800 dark:text-stone-200">{group.materialsCount}</strong> problem sets
@@ -543,10 +566,18 @@ export default function StudyGroupsList({
                   )}
 
                   <button
-                    onClick={() => onSelectGroupMaterials(group.id)}
-                    className="px-3 py-1.5 rounded-xl bg-stone-900 dark:bg-stone-800 hover:bg-blue-600 dark:hover:bg-blue-600 text-white text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer"
+                    onClick={() => {
+                      if (onSelectGroup) {
+                        onSelectGroup(group.id);
+                      } else {
+                        onSelectGroupMaterials(group.id);
+                      }
+                    }}
+                    className="px-3.5 py-1.5 rounded-xl bg-stone-900 dark:bg-stone-800 hover:bg-blue-600 dark:hover:bg-blue-600 text-white text-xs font-bold transition-all shadow-xs hover:shadow flex items-center gap-1.5 cursor-pointer"
+                    title={`Open ${group.name} and chat`}
                   >
-                    <span>View Problems</span>
+                    <MessageSquare className="w-3.5 h-3.5 text-blue-400" />
+                    <span>View Group</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
                 </div>
@@ -632,6 +663,35 @@ export default function StudyGroupsList({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Host Edit Group Modal */}
+      {groupToEdit && (
+        <EditGroupModal
+          isOpen={Boolean(groupToEdit)}
+          onClose={() => setGroupToEdit(null)}
+          group={groupToEdit}
+          currentUser={currentUser}
+          onUpdateGroup={(updated) => {
+            onUpdateGroup?.(updated);
+            setGroupToEdit(null);
+          }}
+        />
+      )}
+
+      {/* Group Members Modal */}
+      {groupForMembers && (
+        <GroupMembersModal
+          isOpen={Boolean(groupForMembers)}
+          onClose={() => setGroupForMembers(null)}
+          group={groupForMembers}
+          currentUser={currentUser}
+          onOpenEditGroup={(g) => {
+            setGroupForMembers(null);
+            setGroupToEdit(g);
+          }}
+          onOpenInviteModal={onOpenInviteModal}
+        />
       )}
     </div>
   );

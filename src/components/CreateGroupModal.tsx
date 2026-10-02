@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { StudyGroup, Subject, UserProfile, GroupPrivacy } from '../types';
 import { generateSecretCode, generateInviteToken, buildInviteUrl } from '../utils/groupCode';
+import { getOrCreateClientUid } from '../utils/storage';
 
 interface CreateGroupModalProps {
   isOpen: boolean;
@@ -88,7 +89,7 @@ export default function CreateGroupModal({
       ? (customSubjectText.trim() || 'General Subject')
       : subject;
 
-    const currentUid = currentUser.authUid || currentUser.id;
+    const currentUid = currentUser.authUid || (currentUser.id && currentUser.id !== 'guest' ? currentUser.id : getOrCreateClientUid());
     const finalGroupId = `grp-${Date.now()}`;
     const finalSecretCode = privacy === 'private' 
       ? (secretCode.trim().toUpperCase() || generateSecretCode(finalSubject))

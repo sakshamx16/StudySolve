@@ -2,10 +2,17 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
+
+// Process-level guards against unexpected crashes causing "This page isn't available"
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught server exception:", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled server rejection:", reason);
+});
 
 const app = express();
 const PORT = 3000;
@@ -33,6 +40,7 @@ const MATERIALS_FILE = path.join(DATA_DIR, "shared_materials.json");
 const DELETED_MATERIALS_FILE = path.join(DATA_DIR, "deleted_materials.json");
 const SOLUTIONS_FILE = path.join(DATA_DIR, "shared_solutions.json");
 const USERS_FILE = path.join(DATA_DIR, "shared_users.json");
+const MESSAGES_FILE = path.join(DATA_DIR, "group_messages.json");
 
 function readJsonFile<T>(filePath: string, fallback: T): T {
   try {
@@ -193,6 +201,78 @@ app.post("/api/groups/:id/join", (req, res) => {
     res.json({ success: true, group: targetGroup });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || "Failed to join group" });
+  }
+});
+
+// GET /api/groups/:id/messages - Get chat messages for a specific study circle
+app.get("/api/groups/:id/messages", (req, res) => {
+  try {
+    const { id } = req.params;
+    const allMessages = readJsonFile<any[]>(MESSAGES_FILE, []);
+    const groupMessages = allMessages.filter((m) => m.groupId === id);
+    res.json({ messages: groupMessages });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to fetch messages" });
+  }
+});
+
+// POST /api/groups/:id/messages - Send a new chat message to the circle
+app.post("/api/groups/:id/messages", (req, res) => {
+  try {
+    const { id } = req.params;
+    const { message } = req.body;
+    if (!message || (!message.text && !message.attachment)) {
+      return res.status(400).json({ error: "Message cannot be empty" });
+    }
+
+    const newMessage = {
+      ...message,
+      id: message.id || `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      groupId: id,
+      createdAtMs: message.createdAtMs || Date.now(),
+      timestamp: message.timestamp || "Just now",
+    };
+
+    const allMessages = readJsonFile<any[]>(MESSAGES_FILE, []);
+    allMessages.push(newMessage);
+    // Keep last 300 messages per circle to stay speedy
+    writeJsonFile(MESSAGES_FILE, allMessages.slice(-500));
+
+    res.json({ success: true, message: newMessage });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to post message" });
+  }
+});
+
+// GET /api/groups/:id/members - Get member profiles for a specific study circle
+app.get("/api/groups/:id/members", (req, res) => {
+  try {
+    const { id } = req.params;
+    const groups = readJsonFile<any[]>(GROUPS_FILE, []);
+    const group = groups.find((g) => g.id === id);
+    if (!group) {
+      return res.status(404).json({ error: "Group not found" });
+    }
+
+    const users = readJsonFile<any[]>(USERS_FILE, []);
+    const memberUids: string[] = group.memberUids || [];
+
+    const memberProfiles = memberUids.map((uid) => {
+      const u = users.find((p) => p.id === uid || p.authUid === uid || (p.email && p.email.toLowerCase() === uid.toLowerCase()));
+      const isHost = uid === group.createdByUid;
+      return {
+        uid,
+        name: u?.name || (isHost ? group.leaderName : `Student (${uid.slice(0, 6)})`),
+        avatar: u?.avatar || '',
+        role: isHost ? 'host' : 'member',
+        gradeLevel: u?.gradeLevel || 'Commerce Student',
+        joinedAt: 'Active member',
+      };
+    });
+
+    res.json({ members: memberProfiles, hostUid: group.createdByUid, leaderName: group.leaderName });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to fetch members" });
   }
 });
 
@@ -378,173 +458,25 @@ app.delete("/api/solutions/:id", (req, res) => {
   }
 });
 
-// Lazy initialization for Google GenAI client
-let aiClient: GoogleGenAI | null = null;
-function getAIClient(): GoogleGenAI {
-  if (!aiClient) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error("GEMINI_API_KEY environment variable is not configured.");
-    }
-    aiClient = new GoogleGenAI({
-      apiKey,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        },
-      },
-    });
-  }
-  return aiClient;
-}
-
 // Health check endpoint
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// Candidate models in priority order for highest availability, lowest latency, and minimal demand spikes
-const CANDIDATE_MODELS = [
-  "gemini-3.1-flash-lite",
-  "gemini-flash-latest",
-  "gemini-3.8-flash",
-];
-
-// AI Study Assistant Chat endpoint (supports text + image analysis)
-app.post("/api/ai-chat", async (req, res) => {
-  try {
-    const { prompt, imageBase64, imageMimeType, history } = req.body;
-
-    if (!prompt && !imageBase64) {
-      return res.status(400).json({ error: "Please provide either a question prompt or an image to analyze." });
-    }
-
-    const ai = getAIClient();
-
-    const systemInstruction = 
-      "You are 'StudySolve AI Tutor', a master academic mentor specialized in Financial Accounting, Taxation, Corporate & Business Law, Costing, Economics, and STEM problem solving. " +
-      "Your objective is to guide students step-by-step through academic problems, past-exam questions, calculations, and concepts. " +
-      "Guidelines: " +
-      "1. If an image is provided (e.g., photo of a ledger, balance sheet, tax calculation, or handwritten math/diagram), inspect it thoroughly and identify key figures and potential errors. " +
-      "2. Structure your guidance clearly: " +
-      "   - **Direct Answer / Concept Overview**: State the core governing rule, accounting standard, or formula. " +
-      "   - **Step-by-Step Working**: Provide clean, numbered calculation steps with units and reasoning. " +
-      "   - **Key Exam/Study Tip**: Highlight common pitfalls students make on this type of problem. " +
-      "3. Be encouraging, concise, and academically precise. Use clean markdown formatting with bolding and lists.";
-
-    const currentParts: any[] = [];
-
-    if (imageBase64) {
-      currentParts.push({
-        inlineData: {
-          mimeType: imageMimeType || "image/jpeg",
-          data: imageBase64,
-        },
-      });
-    }
-
-    if (prompt) {
-      currentParts.push({ text: prompt });
-    }
-
-    const contents: any[] = [];
-
-    if (Array.isArray(history) && history.length > 0) {
-      for (const item of history.slice(-6)) {
-        if (item.role && item.text) {
-          contents.push({
-            role: item.role === "assistant" ? "model" : "user",
-            parts: [{ text: item.text }],
-          });
-        }
-      }
-    }
-
-    contents.push({
-      role: "user",
-      parts: currentParts,
-    });
-
-    let replyText: string | null = null;
-    let lastError: any = null;
-
-    // Resilient fallback across supported models to handle spikes in demand (503/429)
-    for (const model of CANDIDATE_MODELS) {
-      try {
-        const response = await ai.models.generateContent({
-          model,
-          contents,
-          config: {
-            systemInstruction,
-            temperature: 0.3,
-          },
-        });
-
-        if (response && response.text) {
-          replyText = response.text;
-          break;
-        }
-      } catch (err: any) {
-        lastError = err;
-
-        // Check for 503 (high demand) or 429 (rate limit) to try fallback model
-        const isTemporary =
-          err?.status === 503 ||
-          err?.status === 429 ||
-          err?.code === 503 ||
-          err?.code === 429 ||
-          err?.message?.includes("503") ||
-          err?.message?.includes("high demand") ||
-          err?.message?.includes("UNAVAILABLE") ||
-          err?.message?.includes("RESOURCE_EXHAUSTED");
-
-        if (isTemporary) {
-          // Brief pause before switching to the next candidate model
-          await new Promise((resolve) => setTimeout(resolve, 300));
-          continue;
-        }
-
-        // For other errors, continue to the next model in the fallback chain
-        continue;
-      }
-    }
-
-    if (replyText) {
-      return res.json({ reply: replyText });
-    }
-
-    // If all models failed, formulate a clean, human-readable error response
-    let cleanMessage = "The AI Tutor is currently experiencing high demand. Please try again in a few moments.";
-    if (lastError?.message) {
-      try {
-        const parsed = JSON.parse(lastError.message);
-        if (parsed?.error?.message) {
-          cleanMessage = parsed.error.message;
-        }
-      } catch {
-        cleanMessage = lastError.message;
-      }
-    }
-
-    console.error("All AI Tutor candidate models exhausted:", lastError);
-    return res.status(503).json({
-      error: cleanMessage,
-      fallback: "AI Tutor is currently busy. Please click Retry or try again in a few moments.",
-    });
-  } catch (error: any) {
-    console.error("AI Chat Assistant error:", error);
-    return res.status(500).json({
-      error: error?.message || "An unexpected error occurred while communicating with the AI Tutor.",
-      fallback: "AI Tutor is currently busy. Please check your network or try again in a few moments."
-    });
-  }
-});
-
 // Vite middleware & Static Production Serving
 async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
+  const isDev = process.env.NODE_ENV !== "production";
+
+  if (isDev) {
     const vite = await createViteServer({
-      server: { middlewareMode: true, hmr: false, ws: false },
+      server: {
+        middlewareMode: true,
+        hmr: false,
+        ws: false,
+        watch: {
+          ignored: ["**/data/**", "**/dist/**", "**/.git/**", "**/*.json"],
+        },
+      },
       appType: "spa",
     });
 
@@ -568,14 +500,62 @@ async function startServer() {
       next();
     });
 
+    app.get("/favicon.ico", (_req, res) => res.status(204).end());
+
     app.use(vite.middlewares);
+
+    // Guaranteed SPA reload & direct-route fallback for development
+    app.use("*", async (req, res, next) => {
+      if (req.originalUrl.startsWith("/api/")) {
+        return next();
+      }
+      try {
+        const indexPath = path.resolve(process.cwd(), "index.html");
+        let template = fs.readFileSync(indexPath, "utf-8");
+        const cleanPath = req.baseUrl || req.path || "/";
+        try {
+          template = await vite.transformIndexHtml(cleanPath, template);
+        } catch {
+          // Fallback transform against "/"
+          template = await vite.transformIndexHtml("/", template);
+        }
+        res.status(200).set({ "Content-Type": "text/html; charset=utf-8" }).end(template);
+      } catch (e: any) {
+        if (vite) {
+          vite.ssrFixStacktrace(e);
+        }
+        console.warn("Vite reload fallback to raw index.html:", e?.message);
+        try {
+          const rawHtml = fs.readFileSync(path.resolve(process.cwd(), "index.html"), "utf-8");
+          res.status(200).set({ "Content-Type": "text/html; charset=utf-8" }).end(rawHtml);
+        } catch (finalErr) {
+          next(finalErr);
+        }
+      }
+    });
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("*", (_req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
+    app.get("*", (req, res, next) => {
+      if (req.originalUrl.startsWith("/api/")) {
+        return next();
+      }
+      const indexPath = path.join(distPath, "index.html");
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(404).send("Page not found");
+      }
     });
   }
+
+  // Global Express error handler to prevent connection drops causing "This page isn't available"
+  app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error("Server error caught:", err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`StudySolve full-stack server running on http://0.0.0.0:${PORT}`);

@@ -24,6 +24,13 @@ service cloud.firestore {
         resource.data.createdByUid == '' ||
         (request.auth != null && request.auth.uid == resource.data.createdByUid)
       );
+
+      // WhatsApp-style peer group study chat messages
+      match /messages/{messageId} {
+        allow read: if true;
+        allow create, update: if true;
+        allow delete: if true;
+      }
     }
 
     // Questions and study materials

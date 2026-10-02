@@ -17,6 +17,34 @@ export type SolutionMediaType = 'pdf' | 'image' | 'video';
 
 export type GroupPrivacy = 'public' | 'private';
 
+export interface GroupMemberInfo {
+  uid: string;
+  name: string;
+  avatar?: string;
+  role?: 'host' | 'member';
+  joinedAt?: string;
+  email?: string;
+}
+
+export interface GroupMessage {
+  id: string;
+  groupId: string;
+  senderUid: string;
+  senderName: string;
+  senderAvatar?: string;
+  isHost?: boolean;
+  text: string;
+  timestamp: string;
+  createdAtMs: number;
+  attachment?: {
+    type: 'question' | 'image' | 'formula';
+    title: string;
+    id?: string;
+    url?: string;
+  };
+  reactions?: Record<string, string[]>;
+}
+
 export interface StudyGroup {
   id: string;
   name: string;
@@ -35,6 +63,7 @@ export interface StudyGroup {
   secretCode?: string;
   inviteToken?: string;
   memberUids?: string[];
+  members?: GroupMemberInfo[];
 }
 
 export interface MaterialAttachment {
