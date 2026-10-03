@@ -19,8 +19,7 @@ import {
   User,
   Sun,
   Moon,
-  Loader2,
-  PenTool
+  Loader2
 } from 'lucide-react';
 import { StudyGroup, UserProfile } from '../types';
 import { getStudentAvatar } from '../utils/avatar';
@@ -221,18 +220,6 @@ export default function Header({
 
           {/* Primary Action & Profile */}
           <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-            {/* Private Notes Quick Stylus Button - prominently visible on mobile, tablet, and desktop */}
-            <button
-              type="button"
-              onClick={() => window.dispatchEvent(new CustomEvent('open-private-notes'))}
-              className="p-1.5 sm:p-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 transition-colors shrink-0 flex items-center gap-1 cursor-pointer shadow-2xs"
-              title="Open Private Stylus Notes & Scratchpad"
-              aria-label="Open Private Notes"
-            >
-              <PenTool className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-              <span className="hidden lg:inline text-xs font-semibold">Private Notes</span>
-            </button>
-
             {/* Theme Toggle Button */}
             {onToggleTheme && (
               <button
@@ -477,14 +464,6 @@ export default function Header({
             <Award className="w-3.5 h-3.5 text-violet-500 shrink-0" />
             <span>Leaderboard</span>
           </button>
-          <button
-            onClick={() => window.dispatchEvent(new CustomEvent('open-private-notes'))}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 shrink-0 whitespace-nowrap cursor-pointer text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50"
-            title="Private Stylus Notes (Solve Questions Privately)"
-          >
-            <PenTool className="w-3.5 h-3.5 shrink-0" />
-            <span className="font-semibold">Private Notes</span>
-          </button>
         </div>
 
         {/* Mobile search bar and menu */}
@@ -545,16 +524,6 @@ export default function Header({
                 }`}
               >
                 🏆 Solver Leaderboard
-              </button>
-              <button
-                onClick={() => {
-                  window.dispatchEvent(new CustomEvent('open-private-notes'));
-                  setMobileMenuOpen(false);
-                }}
-                className="text-left px-3 py-2 rounded-lg cursor-pointer text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 font-semibold flex items-center gap-2"
-              >
-                <PenTool className="w-4 h-4" />
-                <span>✏️ Private Stylus Notes</span>
               </button>
             </div>
 

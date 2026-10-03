@@ -527,38 +527,49 @@ export default function PrivateStylusNotes() {
 
   return (
     <>
-      {/* Floating Trigger Bubble in place of AI Assistant - transparent background so it does not block the last lines */}
+      {/* Floating Trigger Bubble in place of AI Assistant - circular rectangle with iPhone transparent glass theme */}
       {!isOpen && (
         <aside aria-label="Private Stylus Notes" className="fixed bottom-3 right-3 sm:bottom-5 sm:right-5 z-40 flex flex-col items-end pointer-events-none">
           <button
             type="button"
             onClick={() => setIsOpen(true)}
-            className="pointer-events-auto group relative flex items-center gap-2 p-1 rounded-full bg-transparent hover:bg-transparent text-white transition-all duration-200 border-0 shadow-none focus:outline-hidden cursor-pointer"
+            className="pointer-events-auto group relative flex items-center gap-3 px-3.5 py-2.5 sm:px-4 sm:py-3 rounded-2xl sm:rounded-3xl bg-white/20 dark:bg-stone-900/30 backdrop-blur-2xl border border-white/50 dark:border-white/15 shadow-xl shadow-black/10 hover:bg-white/30 dark:hover:bg-stone-900/45 hover:scale-[1.03] active:scale-95 transition-all duration-200 focus:outline-hidden cursor-pointer overflow-hidden"
             title="Private Stylus Notes & Scratchpad"
           >
-            <div className="relative flex items-center justify-center">
-              <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-indigo-600 to-blue-500 border border-indigo-400/50 flex items-center justify-center shadow-lg group-hover:scale-105 active:scale-95 group-hover:shadow-indigo-500/40 transition-all duration-200">
-                <PenTool className="w-5 h-5 text-white group-hover:rotate-12 transition-transform duration-200" />
+            {/* iPhone Glass Specular Highlight Sheen */}
+            <div className="absolute inset-0 bg-gradient-to-b from-white/40 via-white/10 to-transparent pointer-events-none" />
+
+            <div className="relative flex items-center justify-center shrink-0">
+              <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl sm:rounded-2xl bg-gradient-to-tr from-indigo-600/90 to-blue-500/90 border border-white/40 flex items-center justify-center shadow-md group-hover:scale-105 group-hover:rotate-3 transition-transform duration-200">
+                <PenTool className="w-5 h-5 text-white" />
               </div>
               <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-400"></span>
               </span>
             </div>
-            {/* Transparent subtle label that does not block underlying text with any grey box */}
-            <div className="text-left leading-tight hidden sm:block pr-1 select-none pointer-events-none">
-              <span className="text-[11px] font-bold block text-stone-800 dark:text-stone-200 drop-shadow-sm">
-                Private Notes
+
+            <div className="relative text-left leading-tight hidden xs:block sm:block pr-1 select-none">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-bold block text-stone-900 dark:text-white drop-shadow-xs">
+                  Private Notes
+                </span>
+                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border border-indigo-400/30 font-semibold backdrop-blur-xs">
+                  Stylus
+                </span>
+              </div>
+              <span className="text-[10px] text-stone-700/80 dark:text-stone-300/80 block font-medium">
+                Solve questions privately
               </span>
             </div>
           </button>
         </aside>
       )}
 
-      {/* Main Stylus Scratchpad Window */}
+      {/* Main Stylus Scratchpad Window - iPhone glass circular rectangle */}
       {isOpen && (
         <div
-          className={`fixed z-50 transition-all duration-200 flex flex-col bg-white dark:bg-stone-900 shadow-2xl border border-stone-200 dark:border-stone-800 overflow-hidden ${
+          className={`fixed z-50 transition-all duration-200 flex flex-col bg-white/95 dark:bg-stone-900/95 backdrop-blur-2xl shadow-2xl border border-stone-200/80 dark:border-stone-700/80 overflow-hidden ${
             isFullScreen
               ? 'inset-2 sm:inset-4 rounded-2xl sm:rounded-3xl'
               : 'bottom-3 right-3 sm:bottom-5 sm:right-5 w-[calc(100vw-1.5rem)] sm:w-[580px] h-[640px] max-h-[88vh] rounded-3xl'
