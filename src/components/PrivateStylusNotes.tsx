@@ -77,7 +77,7 @@ export default function PrivateStylusNotes() {
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [activeTab, setActiveTab] = useState<'canvas' | 'text' | 'split'>('canvas');
   
-  // Multi-page state
+  // Multi-page state - 'blank' paper is default
   const [pages, setPages] = useState<NotePage[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -94,7 +94,7 @@ export default function PrivateStylusNotes() {
         title: 'Problem Working 1',
         strokes: [],
         textNotes: '',
-        background: 'grid',
+        background: 'blank',
       },
     ];
   });
@@ -116,6 +116,14 @@ export default function PrivateStylusNotes() {
   const [history, setHistory] = useState<Stroke[][]>([]);
   const [redoStack, setRedoStack] = useState<Stroke[][]>([]);
   const [copiedNotification, setCopiedNotification] = useState(false);
+  const [clearedNotification, setClearedNotification] = useState(false);
+
+  // Global event listener so Header or other components can open Private Notes on mobile & desktop
+  useEffect(() => {
+    const handleOpenNotes = () => setIsOpen(true);
+    window.addEventListener('open-private-notes', handleOpenNotes);
+    return () => window.removeEventListener('open-private-notes', handleOpenNotes);
+  }, []);
 
   // Canvas refs
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -393,27 +401,47 @@ export default function PrivateStylusNotes() {
     );
   };
 
-  // Clear current page
+  // Clear current page (deletes the entire written page instantly)
   const handleClearPage = () => {
-    if (currentPage.strokes.length === 0 && !currentPage.textNotes) return;
-    if (window.confirm('Clear all drawings and workings on this page?')) {
+    // Save to undo history before clearing
+    if (currentPage.strokes.length > 0) {
       setHistory((prev) => [...prev, currentPage.strokes]);
-      setPages((prev) =>
-        prev.map((p, idx) =>
-          idx === currentPageIndex ? { ...p, strokes: [], textNotes: '' } : p
-        )
-      );
+      setRedoStack([]);
     }
+
+    // 1. Clear strokes and text notes
+    setPages((prev) =>
+      prev.map((p, idx) =>
+        idx === currentPageIndex ? { ...p, strokes: [], textNotes: '' } : p
+      )
+    );
+
+    // 2. Clear HTML5 canvas buffer immediately
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    }
+
+    // 3. Re-render background immediately
+    setTimeout(() => {
+      renderCanvas();
+    }, 10);
+
+    setClearedNotification(true);
+    setTimeout(() => setClearedNotification(false), 2000);
   };
 
-  // Page management
+  // Page management - default 'blank' paper
   const handleAddPage = () => {
     const newPage: NotePage = {
       id: `page-${Date.now()}`,
       title: `Problem Working ${pages.length + 1}`,
       strokes: [],
       textNotes: '',
-      background: currentPage.background || 'grid',
+      background: 'blank',
     };
     setPages((prev) => [...prev, newPage]);
     setCurrentPageIndex(pages.length);
@@ -426,13 +454,11 @@ export default function PrivateStylusNotes() {
       handleClearPage();
       return;
     }
-    if (window.confirm(`Delete "${currentPage.title}"?`)) {
-      const updated = pages.filter((_, idx) => idx !== currentPageIndex);
-      setPages(updated);
-      setCurrentPageIndex(Math.max(0, currentPageIndex - 1));
-      setHistory([]);
-      setRedoStack([]);
-    }
+    const updated = pages.filter((_, idx) => idx !== currentPageIndex);
+    setPages(updated);
+    setCurrentPageIndex(Math.max(0, currentPageIndex - 1));
+    setHistory([]);
+    setRedoStack([]);
   };
 
   // Export as PNG
@@ -488,9 +514,9 @@ export default function PrivateStylusNotes() {
     }
   };
 
-  // Change background pattern
+  // Change background pattern - starts with blank paper
   const handleCycleBackground = () => {
-    const bgs: ('blank' | 'lined' | 'grid' | 'dotted')[] = ['grid', 'lined', 'dotted', 'blank'];
+    const bgs: ('blank' | 'lined' | 'grid' | 'dotted')[] = ['blank', 'lined', 'grid', 'dotted'];
     const currentIdx = bgs.indexOf(currentPage.background);
     const nextBg = bgs[(currentIdx + 1) % bgs.length];
 
@@ -501,32 +527,29 @@ export default function PrivateStylusNotes() {
 
   return (
     <>
-      {/* Floating Trigger Bubble in place of AI Assistant */}
+      {/* Floating Trigger Bubble in place of AI Assistant - transparent background so it does not block the last lines */}
       {!isOpen && (
         <aside aria-label="Private Stylus Notes" className="fixed bottom-3 right-3 sm:bottom-5 sm:right-5 z-40 flex flex-col items-end pointer-events-none">
           <button
             type="button"
             onClick={() => setIsOpen(true)}
-            className="pointer-events-auto group relative flex items-center gap-3 px-4 py-3 rounded-full bg-slate-900/90 hover:bg-slate-900 text-white backdrop-blur-xl shadow-xl hover:shadow-2xl hover:scale-[1.03] active:scale-95 transition-all duration-200 border border-slate-700/60 ring-2 ring-indigo-500/20 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
+            className="pointer-events-auto group relative flex items-center gap-2 p-1 rounded-full bg-transparent hover:bg-transparent text-white transition-all duration-200 border-0 shadow-none focus:outline-hidden cursor-pointer"
             title="Private Stylus Notes & Scratchpad"
           >
             <div className="relative flex items-center justify-center">
-              <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-indigo-600 to-blue-500 border border-indigo-400/40 flex items-center justify-center shadow-md">
-                <PenTool className="w-4 h-4 text-white group-hover:rotate-12 transition-transform duration-200" />
+              <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-indigo-600 to-blue-500 border border-indigo-400/50 flex items-center justify-center shadow-lg group-hover:scale-105 active:scale-95 group-hover:shadow-indigo-500/40 transition-all duration-200">
+                <PenTool className="w-5 h-5 text-white group-hover:rotate-12 transition-transform duration-200" />
               </div>
               <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-400"></span>
               </span>
             </div>
-            <div className="text-left leading-tight hidden sm:block pr-1">
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-bold block text-white drop-shadow-xs">Private Notes</span>
-                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-indigo-500/30 text-indigo-200 border border-indigo-400/30 font-semibold">
-                  Stylus
-                </span>
-              </div>
-              <span className="text-[10px] text-slate-300 block">Solve questions privately</span>
+            {/* Transparent subtle label that does not block underlying text with any grey box */}
+            <div className="text-left leading-tight hidden sm:block pr-1 select-none pointer-events-none">
+              <span className="text-[11px] font-bold block text-stone-800 dark:text-stone-200 drop-shadow-sm">
+                Private Notes
+              </span>
             </div>
           </button>
         </aside>
@@ -824,8 +847,12 @@ export default function PrivateStylusNotes() {
                 <button
                   type="button"
                   onClick={handleClearPage}
-                  className="p-1.5 rounded-lg hover:bg-rose-50 hover:text-rose-600 text-stone-400 transition-colors"
-                  title="Clear Page"
+                  className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                    clearedNotification
+                      ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-300 ring-1 ring-rose-400'
+                      : 'hover:bg-rose-50 dark:hover:bg-rose-950/40 text-stone-400 hover:text-rose-600'
+                  }`}
+                  title="Delete Entire Written Page (Clear All Drawings & Notes)"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>

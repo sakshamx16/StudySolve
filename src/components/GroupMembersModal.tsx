@@ -11,11 +11,15 @@ import {
   Share2, 
   UserCheck, 
   BookOpen, 
-  Calendar 
+  Calendar,
+  Trash2,
+  AlertTriangle,
+  UserX
 } from 'lucide-react';
 import { StudyGroup, UserProfile } from '../types';
 import { getStudentAvatar } from '../utils/avatar';
-import { isRealGroupHost } from '../utils/storage';
+import { isRealGroupHost, saveSharedGroupToApi } from '../utils/storage';
+import { addGroupToFirestore } from '../firebase';
 
 interface GroupMembersModalProps {
   isOpen: boolean;
@@ -24,6 +28,7 @@ interface GroupMembersModalProps {
   currentUser: UserProfile;
   onOpenEditGroup?: (group: StudyGroup) => void;
   onOpenInviteModal?: (group: StudyGroup) => void;
+  onUpdateGroup?: (updatedGroup: StudyGroup) => void;
 }
 
 interface MemberDetail {
@@ -42,11 +47,48 @@ export default function GroupMembersModal({
   currentUser,
   onOpenEditGroup,
   onOpenInviteModal,
+  onUpdateGroup,
 }: GroupMembersModalProps) {
   const isHost = isRealGroupHost(group, currentUser);
   const [members, setMembers] = useState<MemberDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [memberToRemove, setMemberToRemove] = useState<MemberDetail | null>(null);
+  const [isRemoving, setIsRemoving] = useState(false);
+
+  const handleConfirmRemoveMember = async (member: MemberDetail) => {
+    if (!isHost) return;
+    setIsRemoving(true);
+    try {
+      // 1. Call DELETE endpoint
+      await fetch(`/api/groups/${encodeURIComponent(group.id)}/members/${encodeURIComponent(member.uid)}`, {
+        method: 'DELETE',
+      }).catch(() => {});
+
+      // 2. Update local member list in modal
+      setMembers((prev) => prev.filter((m) => m.uid !== member.uid));
+
+      // 3. Construct updated group
+      const updatedUids = (group.memberUids || []).filter((u) => u !== member.uid);
+      const updatedMembers = (group.members || []).filter((m) => m.uid !== member.uid);
+      const updatedGroup: StudyGroup = {
+        ...group,
+        memberUids: updatedUids,
+        members: updatedMembers,
+        memberCount: Math.max(1, updatedUids.length),
+      };
+
+      // 4. Update parent
+      onUpdateGroup?.(updatedGroup);
+
+      // 5. Sync to server & firestore
+      saveSharedGroupToApi(updatedGroup).catch(() => {});
+      addGroupToFirestore(updatedGroup).catch(() => {});
+    } finally {
+      setIsRemoving(false);
+      setMemberToRemove(null);
+    }
+  };
 
   useEffect(() => {
     if (!isOpen || !group) return;
@@ -296,9 +338,48 @@ export default function GroupMembersModal({
                         </div>
                       </div>
 
-                      <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 px-2 py-0.5 rounded-full shrink-0">
-                        Joined
-                      </span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 px-2 py-0.5 rounded-full shrink-0">
+                          Joined
+                        </span>
+
+                        {/* ONLY the host has the authority to remove members from the circle */}
+                        {isHost && (
+                          memberToRemove?.uid === member.uid ? (
+                            <div className="flex items-center gap-1.5 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 rounded-xl p-1 animate-in fade-in">
+                              <span className="text-[10px] text-rose-700 dark:text-rose-300 font-bold px-1">
+                                {isRemoving ? 'Removing...' : 'Remove?'}
+                              </span>
+                              <button
+                                type="button"
+                                disabled={isRemoving}
+                                onClick={() => handleConfirmRemoveMember(member)}
+                                className="px-2 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-bold text-[10px] transition-colors cursor-pointer"
+                              >
+                                {isRemoving ? '...' : 'Yes, Remove'}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isRemoving}
+                                onClick={() => setMemberToRemove(null)}
+                                className="px-2 py-1 rounded-lg bg-stone-200 dark:bg-stone-700 hover:bg-stone-300 text-stone-700 dark:text-stone-300 text-[10px] transition-colors cursor-pointer"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setMemberToRemove(member)}
+                              className="px-2 py-1 rounded-xl text-stone-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-transparent hover:border-rose-200 dark:hover:border-rose-900/60 transition-colors flex items-center gap-1 text-[11px] font-medium cursor-pointer"
+                              title={`Remove ${member.name} from this circle (Host authority)`}
+                            >
+                              <UserX className="w-3.5 h-3.5" />
+                              <span className="hidden sm:inline">Remove</span>
+                            </button>
+                          )
+                        )}
+                      </div>
                     </div>
                   );
                 })}

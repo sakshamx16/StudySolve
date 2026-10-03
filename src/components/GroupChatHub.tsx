@@ -26,7 +26,8 @@ import {
   MoreVertical,
   X,
   FileQuestion,
-  ExternalLink
+  ExternalLink,
+  UserX
 } from 'lucide-react';
 import { StudyGroup, StudyMaterial, Solution, UserProfile, GroupMessage } from '../types';
 import { getStudentAvatar } from '../utils/avatar';
@@ -591,12 +592,24 @@ export default function GroupChatHub({
                           key={em}
                           type="button"
                           onClick={() => handleToggleReaction(msg.id, em)}
-                          className="hover:scale-125 transition-transform text-xs"
+                          className="hover:scale-125 transition-transform text-xs cursor-pointer"
                           title={`React with ${em}`}
                         >
                           {em}
                         </button>
                       ))}
+
+                      {/* Host-only member removal / moderation access */}
+                      {isHost && !isSentByMe && (
+                        <button
+                          type="button"
+                          onClick={() => setIsMembersModalOpen(true)}
+                          className="hover:scale-110 transition-transform text-stone-400 hover:text-rose-500 p-0.5 ml-1 cursor-pointer"
+                          title="Host Authority: Manage / Remove Member"
+                        >
+                          <UserX className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -910,6 +923,7 @@ export default function GroupChatHub({
           currentUser={currentUser}
           onOpenEditGroup={() => setIsEditGroupModalOpen(true)}
           onOpenInviteModal={onOpenInviteModal}
+          onUpdateGroup={onUpdateGroup}
         />
       )}
 

@@ -276,6 +276,52 @@ app.get("/api/groups/:id/members", (req, res) => {
   }
 });
 
+// DELETE /api/groups/:id/members/:memberUid - Remove member from group (Host authority)
+app.delete("/api/groups/:id/members/:memberUid", (req, res) => {
+  try {
+    const { id, memberUid } = req.params;
+    const groups = readJsonFile<any[]>(GROUPS_FILE, []);
+    const groupIndex = groups.findIndex((g) => g.id === id);
+    if (groupIndex === -1) {
+      return res.status(404).json({ error: "Group not found" });
+    }
+    const group = groups[groupIndex];
+    // Cannot remove circle host
+    if (memberUid === group.createdByUid) {
+      return res.status(400).json({ error: "Cannot remove circle host" });
+    }
+    const currentMembers: string[] = group.memberUids || [];
+    group.memberUids = currentMembers.filter((u) => u !== memberUid);
+    if (group.members && Array.isArray(group.members)) {
+      group.members = group.members.filter((m: any) => m.uid !== memberUid);
+    }
+    group.memberCount = Math.max(1, group.memberUids.length);
+    groups[groupIndex] = group;
+    writeJsonFile(GROUPS_FILE, groups);
+
+    // Also remove groupId from this user's joinedGroupIds if stored in USERS_FILE
+    try {
+      const users = readJsonFile<any[]>(USERS_FILE, []);
+      let userUpdated = false;
+      users.forEach((u) => {
+        if (u.id === memberUid || u.authUid === memberUid) {
+          if (Array.isArray(u.joinedGroupIds)) {
+            u.joinedGroupIds = u.joinedGroupIds.filter((gid: string) => gid !== id);
+            userUpdated = true;
+          }
+        }
+      });
+      if (userUpdated) {
+        writeJsonFile(USERS_FILE, users);
+      }
+    } catch {}
+
+    res.json({ success: true, group });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to remove member" });
+  }
+});
+
 // GET /api/users/:uid - Get stored user profile & joined groups
 app.get("/api/users/:uid", (req, res) => {
   try {

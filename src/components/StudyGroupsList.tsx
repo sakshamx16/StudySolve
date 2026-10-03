@@ -691,6 +691,7 @@ export default function StudyGroupsList({
             setGroupToEdit(g);
           }}
           onOpenInviteModal={onOpenInviteModal}
+          onUpdateGroup={onUpdateGroup}
         />
       )}
     </div>

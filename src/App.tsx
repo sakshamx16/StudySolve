@@ -1829,17 +1829,32 @@ export default function App() {
       {/* Floating Private Stylus Notes & Scratchpad */}
       <PrivateStylusNotes />
 
-      {/* Footer */}
-      <footer className="mt-auto border-t border-stone-200 bg-white py-6 text-xs text-stone-500">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-stone-800">StudySolve</span>
-            <span>• Collaborative Peer Solutions with Verified Quality Ratings</span>
+      {/* Footer with adequate bottom padding so floating stylus icon never obstructs content */}
+      <footer className="mt-auto border-t border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 pt-6 pb-20 sm:pb-16 text-xs text-stone-500 dark:text-stone-400 transition-colors">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col gap-4">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-stone-800 dark:text-stone-200">StudySolve</span>
+              <span>• Collaborative Peer Solutions with Verified Quality Ratings</span>
+            </div>
+            <div className="flex items-center gap-4 text-[11px] flex-wrap justify-center">
+              <span>Formats: PDF • High-Res Image • Video Walkthrough</span>
+              <span>•</span>
+              <span>Rating Criteria: Clarity • Accuracy • Step-by-Step</span>
+            </div>
           </div>
-          <div className="flex items-center gap-4 text-[11px]">
-            <span>Formats: PDF • High-Res Image • Video Walkthrough</span>
-            <span>•</span>
-            <span>Rating Criteria: Clarity • Accuracy • Step-by-Step</span>
+
+          {/* Last line with external link opening in a fresh new tab */}
+          <div className="pt-3 border-t border-stone-100 dark:border-stone-800 text-center text-xs text-stone-500 dark:text-stone-400">
+            Made and managed by{' '}
+            <a
+              href="https://makewebs-sepia.vercel.app/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 dark:text-blue-400 font-medium hover:underline cursor-pointer"
+            >
+              "https://makewebs-sepia.vercel.app/"
+            </a>
           </div>
         </div>
       </footer>
